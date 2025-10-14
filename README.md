@@ -19,3 +19,4 @@ curl -X POST "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook"   -d "url
 ```
 
 ✅ Готово!
+✅ Test deploy
