@@ -1,6 +1,6 @@
 name = "Teligy3V-bot"
 main = "src/index.js"
-compatibility_date = "2024-10-01"
+compatibility_date = "2025-10-5"
 account_id = "86e97485017fdd3df450c1d758ce1b36"
 
 [vars]
