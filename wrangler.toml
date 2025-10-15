@@ -8,5 +8,5 @@ TG_BOT_TOKEN = "8376536890:AAFhGDG7Srbj5nLKyry_d0z4qsuIbearwow"
 TG_SECRET_TOKEN = "qwerty"
 
 [[kv_namespaces]]
-binding = "USERS"
+binding = "Teligy3V"
 id = "be029e33b2b447e2befdf57751d20343"
