@@ -1,11 +1,11 @@
-name = "Teligy3V"
+name = "Teligy3V-bot"
 main = "src/index.js"
 compatibility_date = "2024-10-01"
 account_id = "86e97485017fdd3df450c1d758ce1b36"
 
 [vars]
-TG_BOT_TOKEN = ""
-TG_SECRET_TOKEN = ""
+TG_BOT_TOKEN = "8376536890:AAFhGDG7Srbj5nLKyry_d0z4qsuIbearwow"
+TG_SECRET_TOKEN = "qwerty"
 
 [[kv_namespaces]]
 binding = "USERS"
