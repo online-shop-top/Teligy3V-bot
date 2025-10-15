@@ -2,11 +2,20 @@ name: Deploy Worker
 on:
   push:
     branches: [ main ]
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      # 1️⃣ Клон репозиторію
       - uses: actions/checkout@v4
+
+      # 2️⃣ Встановлюємо Node.js 20 (потрібно для wrangler v3)
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      # 3️⃣ Деплой Worker через wrangler v3
       - uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
