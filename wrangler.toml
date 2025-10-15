@@ -8,5 +8,5 @@ TG_BOT_TOKEN = "${{ secrets.TG_BOT_TOKEN }}"
 TG_SECRET_TOKEN = "${{ secrets.TG_SECRET_TOKEN }}"
 
 [[kv_namespaces]]
-binding = "Teligy3V"
+binding = "KV_BINDING"
 id = "be029e33b2b447e2befdf57751d20343"
