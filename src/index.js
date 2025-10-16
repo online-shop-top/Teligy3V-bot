@@ -5,6 +5,7 @@ export default {
     }
 
     const update = await request.json();
+    console.log("Incoming update:", JSON.stringify(update));
     const message = update.message;
     if (!message || !message.chat || !message.text) {
       return new Response("No message", { status: 200 });
