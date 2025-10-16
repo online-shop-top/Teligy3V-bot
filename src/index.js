@@ -64,12 +64,18 @@ export default {
 async function sendMessage(env, chatId, text) {
   const url = `https://api.telegram.org/bot${env.TG_BOT_TOKEN}/sendMessage`;
   const body = { chat_id: chatId, text };
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
 
-  const data = await resp.json();
-  console.log("Telegram sendMessage response:", data);
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    const data = await resp.json();
+    console.log("Telegram sendMessage response:", data);
+  } catch (err) {
+    console.error("Error sending message to Telegram:", err);
+  }
 }
+
