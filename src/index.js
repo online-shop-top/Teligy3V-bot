@@ -73,4 +73,3 @@ async function sendMessage(env, chatId, text) {
   const data = await resp.json();
   console.log("Telegram sendMessage response:", data);
 }
-
