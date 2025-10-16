@@ -1,3 +1,31 @@
+// ======= TEST BOT TOKEN =======
+async function testBotToken(env) {
+  const chatId = 2102040810; // твій Telegram ID
+  const text = "Тестове повідомлення від Worker";
+
+  try {
+    const resp = await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    });
+
+    const data = await resp.json();
+    console.log("Test sendMessage response:", data);
+  } catch (err) {
+    console.error("Error testing TG_BOT_TOKEN:", err);
+  }
+}
+
+// ==============================
+export default {
+  async fetch(request, env) {
+    await testBotToken(env);  // ← тест
+    return new Response("Check logs for test message", { status: 200 });
+  },
+};
+
+
 export default {
   async fetch(request, env) {
     if (request.method !== "POST") {
