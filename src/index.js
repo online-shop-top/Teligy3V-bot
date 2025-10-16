@@ -6,19 +6,27 @@ export default {
 
     const update = await request.json();
     console.log("Incoming update:", JSON.stringify(update));
+
     const message = update.message;
     if (!message || !message.chat || !message.text) {
+      console.log("No valid message found");
       return new Response("No message", { status: 200 });
     }
 
-    const chatId = message.chat.id;
+    // Переконаємось, що chatId — число
+    const chatId = Number(message.chat.id);
+    if (isNaN(chatId)) {
+      console.log("Invalid chatId:", message.chat.id);
+      return new Response("Invalid chat id", { status: 200 });
+    }
+
     const text = message.text.trim();
 
-    // Отримуємо попередній стан користувача з KV
+    // Ключ користувача у KV
     const userKey = `user_${chatId}`;
     let userState = await env.Teligy3V.get(userKey, { type: "json" }) || {};
 
-    // Логіка запитань
+    // Логіка запитів
     if (!userState.step) {
       userState.step = "flat";
       await env.Teligy3V.put(userKey, JSON.stringify(userState));
@@ -52,12 +60,17 @@ export default {
   },
 };
 
+// Функція відправки повідомлення у Telegram з логом відповіді
 async function sendMessage(env, chatId, text) {
   const url = `https://api.telegram.org/bot${env.TG_BOT_TOKEN}/sendMessage`;
   const body = { chat_id: chatId, text };
-  await fetch(url, {
+  const resp = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+
+  const data = await resp.json();
+  console.log("Telegram sendMessage response:", data);
 }
+
