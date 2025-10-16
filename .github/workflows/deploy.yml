@@ -7,11 +7,21 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      # 1️⃣ Клон репозиторію
       - uses: actions/checkout@v4
+
+      # 2️⃣ Встановлюємо Node.js 20
       - uses: actions/setup-node@v3
         with:
           node-version: '20'
+
+      # 3️⃣ Встановлення залежностей (якщо будуть)
+      - run: npm install
+        working-directory: ./src || .
+
+      # 4️⃣ Деплой Worker через wrangler
       - uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          log-level: debug
