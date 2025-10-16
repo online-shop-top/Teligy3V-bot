@@ -6,16 +6,19 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
       # 1️⃣ Завантаження коду
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       # 2️⃣ Встановлення Node.js
-      - uses: actions/setup-node@v3
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
         with:
-          node-version: '20'
+          node-version: 20
 
-      # 3️⃣ Якщо є package.json — встановлюємо залежності
+      # 3️⃣ Встановлення залежностей (якщо є package.json)
       - name: Install dependencies (optional)
         run: |
           if [ -f "package.json" ]; then
@@ -28,4 +31,4 @@ jobs:
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          log-level: debug
+          command: publish
