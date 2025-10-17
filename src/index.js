@@ -1,244 +1,136 @@
 export default {
   async fetch(request, env) {
-    if (request.method !== "POST") return new Response("OK", { status: 200 });
+    if (request.method === "POST") {
+      const update = await request.json();
+      console.log("Incoming update:", JSON.stringify(update));
 
-    const update = await request.json();
-    const BOT_TOKEN = env.TG_BOT_TOKEN;
-    const ADMIN_ID = 2102040810; // Alex R.
-    const BASE_URL = `https://api.telegram.org/bot${BOT_TOKEN}`;
-    const KV = env.Teligy3V;
-
-    console.log("Incoming update:", JSON.stringify(update));
-
-    // 🧩 1️⃣ Новий учасник у групі
-    if (update.message?.new_chat_member) {
-      const chatId = update.message.chat.id;
-      const user = update.message.new_chat_member;
-      const userId = user.id;
-      const firstName = user.first_name || "Користувач";
-
-      // Тимчасово обмежуємо нового учасника
-      await fetch(`${BASE_URL}/restrictChatMember`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          user_id: userId,
-          permissions: {
-            can_send_messages: false,
-            can_send_media_messages: false,
-            can_send_polls: false,
-            can_send_other_messages: false,
-            can_add_web_page_previews: false
-          }
-        }),
-      });
-
-      // Зберігаємо стан у KV
-      await KV.put(`user:${userId}`, JSON.stringify({
-        status: "pending",
-        chatId,
-        firstName,
-        step: "await_join",
-      }));
-
-      // Надсилаємо кнопку "ПРИЄДНАТИСЬ"
-      await fetch(`${BASE_URL}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: `👋 Привіт, ${firstName}!\nЩоб приєднатися до групи, натисни кнопку нижче.`,
-          reply_markup: {
-            inline_keyboard: [[{ text: "✅ ПРИЄДНАТИСЬ", callback_data: `join_${userId}` }]]
-          }
-        }),
-      });
-      return new Response("OK", { status: 200 });
-    }
-
-    // 🧩 2️⃣ Натискання кнопки "ПРИЄДНАТИСЬ"
-    if (update.callback_query) {
-      const cb = update.callback_query;
-      const userId = cb.from.id;
-      const data = cb.data;
-
-      if (data.startsWith("join_")) {
-        await KV.put(`user:${userId}`, JSON.stringify({ status: "collecting", step: "ask_flat" }));
-
-        // Повідомлення у приватний чат
-        await fetch(`${BASE_URL}/sendMessage`, {
+      const api = (method, body) =>
+        fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/${method}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: userId,
-            text: `Привіт! 👋\nВведи, будь ласка, номер своєї квартири.`,
-          }),
+          body: JSON.stringify(body),
         });
 
-        await fetch(`${BASE_URL}/answerCallbackQuery`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            callback_query_id: cb.id,
-            text: "Бот надіслав вам повідомлення у приватний чат 📨",
-            show_alert: false
-          }),
-        });
-      }
-      return new Response("OK", { status: 200 });
-    }
+      // ---- Повідомлення користувача ----
+      if (update.message) {
+        const msg = update.message;
+        const chatId = msg.chat.id;
+        const text = msg.text || "";
 
-    // 🧩 3️⃣ Приватні повідомлення користувача
-    if (update.message && update.message.chat.type === "private") {
-      const userId = update.message.from.id;
-      const text = update.message.text.trim();
-      const userDataRaw = await KV.get(`user:${userId}`);
-      let userData = userDataRaw ? JSON.parse(userDataRaw) : null;
-
-      if (!userData) {
-        await fetch(`${BASE_URL}/sendMessage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: userId,
-            text: "Ви ще не почали процес приєднання. Перейдіть у групу та натисніть кнопку 'ПРИЄДНАТИСЬ'.",
-          }),
-        });
-        return new Response("OK", { status: 200 });
-      }
-
-      // 🏠 Крок 1: Користувач вводить номер квартири
-      if (userData.step === "ask_flat") {
-        const flat = text;
-        const flatUsersRaw = await KV.get(`flat:${flat}`);
-        const flatUsers = flatUsersRaw ? JSON.parse(flatUsersRaw) : [];
-
-        if (flatUsers.length >= 2) {
-          await fetch(`${BASE_URL}/sendMessage`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              chat_id: userId,
-              text: "🚫 На цю квартиру вже зареєстровано максимальну кількість осіб. Зверніться до адміністратора.",
-            }),
+        // 🟢 Крок 1: /start join — показує кнопку “✅ Приєднатись”
+        if (text === "/start join") {
+          await api("sendMessage", {
+            chat_id: chatId,
+            text: "Привіт! Натисни кнопку нижче, щоб приєднатися до спільноти 🏘️",
+            reply_markup: {
+              inline_keyboard: [[{ text: "✅ Приєднатись", callback_data: "start_join" }]],
+            },
           });
-          return new Response("OK", { status: 200 });
+          return new Response("OK");
         }
 
-        userData.flat = flat;
-        userData.step = "ask_name";
-        await KV.put(`user:${userId}`, JSON.stringify(userData));
+        // 🟢 Отримання стану користувача
+        const pending = await env.Teligy3V.get(`user_${chatId}`, { type: "json" });
 
-        await fetch(`${BASE_URL}/sendMessage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: userId,
-            text: "Вкажіть своє ім’я:",
-          }),
-        });
-        return new Response("OK", { status: 200 });
-      }
+        // 🟠 Введення номера квартири
+        if (pending && pending.status === "awaiting_flat") {
+          const flat = text.trim();
 
-      // 👤 Крок 2: Ім’я
-      if (userData.step === "ask_name") {
-        userData.name = text;
-        userData.step = "ask_phone";
-        await KV.put(`user:${userId}`, JSON.stringify(userData));
+          // Отримуємо список усіх користувачів
+          const listKeys = await env.Teligy3V.list({ prefix: "user_" });
+          let sameFlatCount = 0;
 
-        await fetch(`${BASE_URL}/sendMessage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: userId,
-            text: "Вкажіть ваш номер телефону:",
-          }),
-        });
-        return new Response("OK", { status: 200 });
-      }
+          for (const k of listKeys.keys) {
+            const user = await env.Teligy3V.get(k.name, { type: "json" });
+            if (user && user.flat === flat && user.status === "approved") {
+              sameFlatCount++;
+            }
+          }
 
-      // 📞 Крок 3: Телефон
-      if (userData.step === "ask_phone") {
-        userData.phone = text;
-        userData.status = "awaiting_code";
-        const code = Math.floor(1000 + Math.random() * 9000);
-        userData.code = code;
-        await KV.put(`user:${userId}`, JSON.stringify(userData));
+          // 🔴 Якщо на квартиру вже є 2+ осіб
+          if (sameFlatCount >= 2) {
+            await api("sendMessage", {
+              chat_id: chatId,
+              text: `❌ На квартиру №${flat} вже зареєстровано максимальну кількість мешканців (2).\nЗверніться до адміністратора.`,
+            });
+            await env.Teligy3V.delete(`user_${chatId}`);
+            return new Response("OK");
+          }
 
-        // надсилаємо адміну
-        await fetch(`${BASE_URL}/sendMessage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: ADMIN_ID,
-            text: `🆕 Нова заявка:\n👤 ${userData.name}\n🏠 Квартира: ${userData.flat}\n📞 ${userData.phone}\n🆔 ${userId}\nКод підтвердження: ${code}`,
-          }),
-        });
-
-        await fetch(`${BASE_URL}/sendMessage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: userId,
-            text: "Ваші дані відправлено адміністратору. Коли він скаже вам код, введіть його тут:",
-          }),
-        });
-        return new Response("OK", { status: 200 });
-      }
-
-      // ✅ Крок 4: Підтвердження коду
-      if (userData.step === "awaiting_code") {
-        if (text === String(userData.code)) {
-          userData.status = "approved";
-          await KV.put(`user:${userId}`, JSON.stringify(userData));
-
-          // додаємо користувача до списку квартири
-          const flatUsersRaw = await KV.get(`flat:${userData.flat}`);
-          const flatUsers = flatUsersRaw ? JSON.parse(flatUsersRaw) : [];
-          flatUsers.push({ userId, name: userData.name });
-          await KV.put(`flat:${userData.flat}`, JSON.stringify(flatUsers));
-
-          // повідомлення користувачу
-          await fetch(`${BASE_URL}/sendMessage`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              chat_id: userId,
-              text: "✅ Код підтверджено! Ви приєднані до групи.",
-            }),
-          });
-
-          // розблоковуємо учасника у групі
-          await fetch(`${BASE_URL}/restrictChatMember`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              chat_id: userData.chatId,
-              user_id: userId,
-              permissions: {
-                can_send_messages: true,
-                can_send_media_messages: true,
-                can_send_polls: true,
-                can_send_other_messages: true,
-                can_add_web_page_previews: true
-              }
-            }),
-          });
-        } else {
-          await fetch(`${BASE_URL}/sendMessage`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              chat_id: userId,
-              text: "❌ Невірний код. Спробуйте ще раз.",
-            }),
-          });
+          // ✅ Інакше — продовжуємо збір даних
+          await env.Teligy3V.put(`user_${chatId}`, JSON.stringify({ ...pending, flat, status: "awaiting_name" }));
+          await api("sendMessage", { chat_id: chatId, text: "Введи своє ім’я:" });
+          return new Response("OK");
         }
-        return new Response("OK", { status: 200 });
+
+        // 🟠 Введення імені
+        if (pending && pending.status === "awaiting_name") {
+          await env.Teligy3V.put(`user_${chatId}`, JSON.stringify({ ...pending, name: text, status: "awaiting_phone" }));
+          await api("sendMessage", { chat_id: chatId, text: "Введи свій номер телефону:" });
+          return new Response("OK");
+        }
+
+        // 🟠 Введення телефону → надсилання адміністратору
+        if (pending && pending.status === "awaiting_phone") {
+          const user = { ...pending, phone: text, status: "awaiting_code" };
+          const code = Math.floor(1000 + Math.random() * 9000).toString();
+          user.code = code;
+
+          await env.Teligy3V.put(`user_${chatId}`, JSON.stringify(user));
+
+          // Надсилаємо адміністратору
+          await api("sendMessage", {
+            chat_id: 2102040810, // ID адміністратора
+            text: `👤 Новий учасник:\n🏢 Квартира: ${user.flat}\n👋 Ім’я: ${user.name}\n📞 Телефон: ${user.phone}\n🔑 Код підтвердження: ${code}`,
+          });
+
+          await api("sendMessage", {
+            chat_id: chatId,
+            text: "Очікується підтвердження адміністратора. Введи код, коли отримаєш його.",
+          });
+          return new Response("OK");
+        }
+
+        // 🟠 Перевірка коду підтвердження
+        if (pending && pending.status === "awaiting_code") {
+          if (text === pending.code) {
+            await env.Teligy3V.put(`user_${chatId}`, JSON.stringify({ ...pending, status: "approved" }));
+
+            await api("sendMessage", {
+              chat_id: chatId,
+              text: "✅ Вітаємо! Тебе підтверджено. Тепер ти можеш приєднатися до групи 🎉",
+            });
+
+            // Посилання на групу
+            await api("sendMessage", {
+              chat_id: chatId,
+              text: "Ось посилання для вступу до групи: https://t.me/your_private_group_link",
+            });
+          } else {
+            await api("sendMessage", { chat_id: chatId, text: "❌ Невірний код. Спробуй ще раз." });
+          }
+          return new Response("OK");
+        }
       }
+
+      // ---- Натискання кнопки ----
+      if (update.callback_query) {
+        const query = update.callback_query;
+        const chatId = query.from.id; // важливо! chat.id може бути іншим
+        const data = query.data;
+
+        if (data === "start_join") {
+          await env.Teligy3V.put(`user_${chatId}`, JSON.stringify({ chatId, status: "awaiting_flat" }));
+          await api("sendMessage", { chat_id: chatId, text: "Введи номер своєї квартири:" });
+        }
+
+        await api("answerCallbackQuery", { callback_query_id: query.id });
+        return new Response("OK");
+      }
+
+      return new Response("OK");
     }
 
-    return new Response("OK", { status: 200 });
+    return new Response("Worker is running", { status: 200 });
   },
 };
