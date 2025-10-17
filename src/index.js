@@ -4,7 +4,6 @@ export default {
       const update = await request.json();
       console.log("Incoming update:", JSON.stringify(update));
 
-      if (update.message) {
       if (update.message.text === "/start") {
         const chatId = update.message.chat.id;
         const body = { chat_id: chatId, text: "Привіт! Введіть номер квартири:" };
