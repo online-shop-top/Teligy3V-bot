@@ -8,7 +8,7 @@ export default {
         const chatId = update.message.chat.id;
         const text = update.message.text || "";
 
-        // спроба відповісти
+        // Відправка відповіді
         const url = `https://api.telegram.org/bot${env.TG_BOT_TOKEN}/sendMessage`;
         const body = { chat_id: chatId, text: "✅ Бот отримав: " + text };
 
