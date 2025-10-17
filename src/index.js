@@ -1,19 +1,5 @@
 export default {
   async fetch(request, env) {
-    // 🔍 Перевіряємо, що секрети передаються
-    if (!env.TG_BOT_TOKEN) {
-      console.log("⚠️ TG_BOT_TOKEN is MISSING");
-    } else {
-      console.log("✅ TG_BOT_TOKEN is PRESENT");
-    }
-
-    if (!env.TG_SECRET_TOKEN) {
-      console.log("⚠️ TG_SECRET_TOKEN is MISSING");
-    } else {
-      console.log("✅ TG_SECRET_TOKEN is PRESENT");
-    }
-
-    // --- далі твій основний код ---
     if (request.method === "POST") {
       const update = await request.json();
       console.log("Incoming update:", JSON.stringify(update));
@@ -22,6 +8,7 @@ export default {
         const chatId = update.message.chat.id;
         const text = update.message.text || "";
 
+        // Відправка відповіді через Telegram API
         const url = `https://api.telegram.org/bot${env.TG_BOT_TOKEN}/sendMessage`;
         const body = { chat_id: chatId, text: "✅ Бот отримав: " + text };
 
