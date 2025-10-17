@@ -4,22 +4,15 @@ export default {
       const update = await request.json();
       console.log("Incoming update:", JSON.stringify(update));
 
-      if (update.message) {
+      if (update.message.text === "/start") {
         const chatId = update.message.chat.id;
-        const text = update.message.text || "";
+        const body = { chat_id: chatId, text: "Привіт! Введіть номер квартири (1–120):" };
 
-        // Відправка відповіді через Telegram API
-        const url = `https://api.telegram.org/bot${env.TG_BOT_TOKEN}/sendMessage`;
-        const body = { chat_id: chatId, text: "✅ Бот отримав: " + text };
-
-        const resp = await fetch(url, {
+        await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/sendMessage`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-
-        const data = await resp.text();
-        console.log("Telegram sendMessage response:", data);
       }
 
       return new Response("OK", { status: 200 });
