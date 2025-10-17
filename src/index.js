@@ -7,7 +7,7 @@ export default {
       if (update.message) {
       if (update.message.text === "/start") {
         const chatId = update.message.chat.id;
-        const body = { chat_id: chatId, text: "Привіт! Введіть номер квартири (1–120):" };
+        const body = { chat_id: chatId, text: "Привіт! Введіть номер квартири:" };
 
         await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/sendMessage`, {
           method: "POST",
