@@ -104,7 +104,7 @@ export default {
             // Посилання на групу
             await api("sendMessage", {
               chat_id: chatId,
-              text: "Ось посилання для вступу до групи: https://t.me/your_private_group_link",
+              text: "Ось посилання для вступу до групи: https://t.me/+6_OJtJfRHSZjZjQy",
             });
           } else {
             await api("sendMessage", { chat_id: chatId, text: "❌ Невірний код. Спробуй ще раз." });
