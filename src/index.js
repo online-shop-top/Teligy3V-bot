@@ -1,4 +1,3 @@
-// Worker для обробки webhook Telegram
 export default {
   async fetch(request, env) {
     if (request.method !== "POST") {
@@ -6,124 +5,185 @@ export default {
     }
 
     const update = await request.json();
-    console.log("Incoming update:", JSON.stringify(update));
+    const TG_API = `https://api.telegram.org/bot${env.TG_BOT_TOKEN}`;
 
-    // --- 1️⃣ Новий учасник приєднався ---
+    // Функція відправки повідомлення
+    async function sendMessage(chat_id, text, reply_markup) {
+      const body = { chat_id, text };
+      if (reply_markup) body.reply_markup = reply_markup;
+      await fetch(`${TG_API}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    }
+
+    // Функція обмеження користувача у чаті
+    async function restrictUser(chat_id, user_id) {
+      await fetch(`${TG_API}/restrictChatMember`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id,
+          user_id,
+          permissions: {
+            can_send_messages: false,
+            can_send_media_messages: false,
+            can_send_other_messages: false,
+            can_add_web_page_previews: false,
+          },
+        }),
+      });
+    }
+
     if (update.message && update.message.new_chat_members) {
       for (const member of update.message.new_chat_members) {
         const chatId = update.message.chat.id;
         const userId = member.id;
         const firstName = member.first_name || "Користувач";
 
-        // Зберігаємо дату входу в KV
-        const entryData = {
-          user_id: userId,
-          chat_id: chatId,
-          joined_at: Date.now(),
-          status: "pending", // ще не підтверджений
+        // Обмежуємо нового користувача
+        await restrictUser(chatId, userId);
+
+        // Зберігаємо pending_users: ID і дата входу
+        const now = new Date().toISOString();
+        await env.KV.put(`pending_users:${userId}`, JSON.stringify({ userId, joinedAt: now, status: "pending" }));
+
+        // Відправляємо у групу повідомлення з кнопкою "ПРИЄДНАТИСЬ"
+        const keyboard = {
+          inline_keyboard: [[{ text: "ПРИЄДНАТИСЬ", callback_data: `join_${userId}` }]],
         };
-        await env.KV.put(`pending_users:${userId}`, JSON.stringify(entryData));
-
-        // Тимчасово блокуємо користувача
-        await restrictMember(env.TG_BOT_TOKEN, chatId, userId);
-
-        // Надсилаємо повідомлення з кнопкою "Приєднатися"
-        await sendJoinMessage(env.TG_BOT_TOKEN, chatId, userId, firstName);
+        await sendMessage(
+          chatId,
+          `👋 Привіт, ${firstName}!\nНатисни кнопку нижче, щоб подати заявку на приєднання.`,
+          keyboard
+        );
       }
-      return new Response("OK", { status: 200 });
     }
 
-    // --- 2️⃣ Callback кнопка "Приєднатися" ---
     if (update.callback_query) {
+      const data = update.callback_query.data;
       const chatId = update.callback_query.message.chat.id;
       const userId = update.callback_query.from.id;
 
-      if (update.callback_query.data === `join_${userId}`) {
-        // Отримуємо запис користувача з KV
-        let userData = (await env.KV.get(`pending_users:${userId}`, { type: "json" })) || null;
-        if (!userData) return new Response("OK", { status: 200 });
+      if (data === `join_${userId}`) {
+        let userData = (await env.KV.get(`pending_users:${userId}`, { type: "json" })) || {};
+        if (!userData.status || userData.status === "pending") {
+          userData.status = "awaiting_apartment";
+          await env.KV.put(`pending_users:${userId}`, JSON.stringify(userData));
 
-        // Відправляємо приватне повідомлення користувачу
-        await sendMessage(env.TG_BOT_TOKEN, userId, 
-          "Привіт! Щоб приєднатися до групи, введіть номер квартири та контактні дані у форматі: Квартира, Ім'я, Телефон"
-        );
+          // Відправляємо приватне повідомлення з проханням ввести номер квартири
+          await sendMessage(userId, "Привіт! Щоб приєднатися до групи, введи номер квартири (від 1 до 120).");
+          
+          // Підтверджуємо натискання кнопки
+          await fetch(`${TG_API}/answerCallbackQuery`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              callback_query_id: update.callback_query.id,
+              text: "✅ Тепер введи номер квартири у приватному чаті.",
+              show_alert: false,
+            }),
+          });
 
-        // Відповідаємо на callback
-        await answerCallback(env.TG_BOT_TOKEN, update.callback_query.id, "✅ Перевірте приватний чат!");
+          // Видаляємо повідомлення кнопки
+          await fetch(`${TG_API}/deleteMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: chatId,
+              message_id: update.callback_query.message.message_id,
+            }),
+          });
+        }
       }
       return new Response("OK", { status: 200 });
     }
 
-    // --- 3️⃣ Обробка текстових повідомлень у приватному чаті ---
-    if (update.message && update.message.text) {
+    // Обробка текстових повідомлень в приватному чаті для збору даних
+    if (update.message && update.message.chat.type === "private") {
       const userId = update.message.from.id;
-      const chatId = update.message.chat.id;
-      const text = update.message.text.trim();
-
+      const text = (update.message.text || "").trim();
       let userData = (await env.KV.get(`pending_users:${userId}`, { type: "json" })) || null;
-      if (!userData) return new Response("OK", { status: 200 });
+      if (!userData) {
+        return new Response("OK", { status: 200 }); // Якщо користувача немає у pending_users — ігноруємо
+      }
 
-      // --- Введення квартири та контактів ---
-      if (userData.status === "pending") {
-        const parts = text.split(",").map(s => s.trim());
-        if (parts.length !== 3) {
-          await sendMessage(env.TG_BOT_TOKEN, userId, "❌ Некоректний формат. Введіть: Квартира, Ім'я, Телефон");
+      if (userData.status === "awaiting_apartment") {
+        const aptNum = Number(text);
+        if (isNaN(aptNum) || aptNum < 1 || aptNum > 120) {
+          await sendMessage(userId, "Такого номеру квартири не існує. Спробуйте ще раз.");
           return new Response("OK", { status: 200 });
         }
 
-        const [apartmentNumber, name, phone] = parts;
-
-        // Перевірка кількості мешканців на KV
-        const residents = (await env.KV.get(`apartments:${apartmentNumber}`, { type: "json" })) || [];
+        // Перевірка кількості зареєстрованих
+        const residents = (await env.KV.get(`apartments:${aptNum}`, { type: "json" })) || [];
         if (residents.length >= 2) {
-          await sendMessage(env.TG_BOT_TOKEN, userId, 
-            "На цю квартиру вже зареєстровано максимальну кількість осіб. Зверніться до адміністратора."
-          );
+          await sendMessage(userId, "На цю квартиру вже зареєстровано максимальну кількість осіб. Зверніться до адміністратора.");
           return new Response("OK", { status: 200 });
         }
 
-        // Генеруємо код для адміністратора
-        const adminCode = Math.floor(1000 + Math.random() * 9000);
-
-        // Оновлюємо дані користувача
-        userData = {
-          ...userData,
-          status: "awaiting_admin_code",
-          apartment: apartmentNumber,
-          name,
-          phone,
-          admin_code: adminCode,
-        };
+        userData.status = "awaiting_name_phone";
+        userData.apartment = aptNum;
         await env.KV.put(`pending_users:${userId}`, JSON.stringify(userData));
-
-        // Надсилаємо адміністратору код підтвердження
-        const adminId = Number(env.ADMIN_CHAT_ID);
-        await sendMessage(env.TG_BOT_TOKEN, adminId, 
-          `Новий учасник:\nІм'я: ${name}\nКвартира: ${apartmentNumber}\nТелефон: ${phone}\nКод підтвердження: ${adminCode}`
-        );
-
-        await sendMessage(env.TG_BOT_TOKEN, userId, "Ваші дані надіслані адміністратору. Введіть отриманий код для підтвердження.");
+        await sendMessage(userId, "Введіть ваше ім'я та номер телефону у форматі: Ім'я, Телефон");
         return new Response("OK", { status: 200 });
       }
 
-      // --- Введення коду підтвердження ---
-      if (userData.status === "awaiting_admin_code") {
-        if (text === String(userData.admin_code)) {
-          // Код вірний → підтверджуємо користувача
-          userData.status = "approved";
-          await env.KV.put(`pending_users:${userId}`, JSON.stringify(userData));
+      if (userData.status === "awaiting_name_phone") {
+        const parts = text.split(",").map(s => s.trim());
+        if (parts.length < 2) {
+          await sendMessage(userId, "Будь ласка, введіть ім'я та телефон у форматі: Ім'я, Телефон");
+          return new Response("OK", { status: 200 });
+        }
+        const [name, phone] = parts;
+        userData.name = name;
+        userData.phone = phone;
 
-          // Додаємо користувача до квартири
+        // Генерація коду для адміністратора
+        const adminCode = Math.floor(1000 + Math.random() * 9000);
+        userData.admin_code = adminCode;
+        userData.status = "awaiting_code";
+        await env.KV.put(`pending_users:${userId}`, JSON.stringify(userData));
+
+        // Надсилаємо адміністратору повідомлення
+        const adminId = Number(env.ADMIN_CHAT_ID);
+        await sendMessage(adminId, `Новий учасник:\nІм'я: ${name}\nКвартира: ${userData.apartment}\nТелефон: ${phone}\nКод підтвердження: ${adminCode}`);
+
+        await sendMessage(userId, "Ваші дані надіслані адміністратору. Введіть отриманий код підтвердження.");
+        return new Response("OK", { status: 200 });
+      }
+
+      if (userData.status === "awaiting_code") {
+        if (text === String(userData.admin_code)) {
+          userData.status = "approved";
+          // Додаємо користувача у список мешканців квартири
           const residents = (await env.KV.get(`apartments:${userData.apartment}`, { type: "json" })) || [];
           residents.push(userId);
           await env.KV.put(`apartments:${userData.apartment}`, JSON.stringify(residents));
+          await env.KV.put(`pending_users:${userId}`, JSON.stringify(userData));
 
-          // Знімаємо обмеження у групі
-          await restrictMember(env.TG_BOT_TOKEN, userData.chat_id, userId, true);
+          // Знімаємо обмеження з користувача
+          await fetch(`${TG_API}/restrictChatMember`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: userData.chat_id || null,
+              user_id: userId,
+              permissions: {
+                can_send_messages: true,
+                can_send_media_messages: true,
+                can_send_polls: true,
+                can_send_other_messages: true,
+                can_add_web_page_previews: true,
+                can_invite_users: true,
+              },
+            }),
+          });
 
-          await sendMessage(env.TG_BOT_TOKEN, userId, "✅ Ви успішно приєднані до групи!");
+          await sendMessage(userId, "✅ Ви успішно приєднані до групи!");
         } else {
-          await sendMessage(env.TG_BOT_TOKEN, userId, "❌ Невірний код. Спробуйте ще раз.");
+          await sendMessage(userId, "❌ Невірний код. Спробуйте ще раз.");
         }
         return new Response("OK", { status: 200 });
       }
@@ -132,56 +192,3 @@ export default {
     return new Response("OK", { status: 200 });
   },
 };
-
-// --- Допоміжні функції ---
-async function sendMessage(token, chatId, text, keyboard) {
-  const body = { chat_id: chatId, text };
-  if (keyboard) body.reply_markup = keyboard;
-
-  const resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = await resp.json();
-  if (!data.ok) console.error("Telegram sendMessage error:", data);
-}
-
-async function answerCallback(token, callbackId, text) {
-  const resp = await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ callback_query_id: callbackId, text, show_alert: false }),
-  });
-  const data = await resp.json();
-  if (!data.ok) console.error("Telegram answerCallbackQuery error:", data);
-}
-
-async function restrictMember(token, chatId, userId, unrestrict = false) {
-  const permissions = unrestrict
-    ? {
-        can_send_messages: true,
-        can_send_media_messages: true,
-        can_send_polls: true,
-        can_send_other_messages: true,
-        can_add_web_page_previews: true,
-        can_invite_users: true,
-      }
-    : { can_send_messages: false };
-
-  const resp = await fetch(`https://api.telegram.org/bot${token}/restrictChatMember`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, user_id: userId, permissions }),
-  });
-  const data = await resp.json();
-  if (!data.ok) console.error("Telegram restrictChatMember error:", data);
-}
-
-async function sendJoinMessage(token, chatId, userId, firstName) {
-  const keyboard = { inline_keyboard: [[{ text: "✅ Приєднатися", callback_data: `join_${userId}` }]] };
-  await sendMessage(token, chatId,
-    `👋 Ласкаво просимо, ${firstName}!\nНатисніть кнопку нижче, щоб приєднатися до чату.`,
-    keyboard
-  );
-}
