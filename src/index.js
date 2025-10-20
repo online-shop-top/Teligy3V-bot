@@ -1,3 +1,4 @@
+// Worker для обробки webhook Telegram
 export default {
   async fetch(request, env) {
     if (request.method !== "POST") {
@@ -14,107 +15,113 @@ export default {
         const userId = member.id;
         const firstName = member.first_name || "Користувач";
 
-        // Тимчасово блокуємо нового учасника
+        // Зберігаємо дату входу в KV
+        const entryData = {
+          user_id: userId,
+          chat_id: chatId,
+          joined_at: Date.now(),
+          status: "pending", // ще не підтверджений
+        };
+        await env.KV.put(`pending_users:${userId}`, JSON.stringify(entryData));
+
+        // Тимчасово блокуємо користувача
         await restrictMember(env.TG_BOT_TOKEN, chatId, userId);
 
-        // Відправляємо повідомлення з кнопкою "Приєднатися"
+        // Надсилаємо повідомлення з кнопкою "Приєднатися"
         await sendJoinMessage(env.TG_BOT_TOKEN, chatId, userId, firstName);
       }
       return new Response("OK", { status: 200 });
     }
 
-    // --- 2️⃣ Обробка callback кнопки ---
+    // --- 2️⃣ Callback кнопка "Приєднатися" ---
     if (update.callback_query) {
       const chatId = update.callback_query.message.chat.id;
       const userId = update.callback_query.from.id;
 
       if (update.callback_query.data === `join_${userId}`) {
-        // Створюємо запис у KV якщо його ще нема
-        let userData = (await env.KV.get(`pending_users:${userId}`, { type: "json" })) || {
-          status: "pending",
-          chat_id: chatId,
-        };
-        await env.KV.put(`pending_users:${userId}`, JSON.stringify(userData));
+        // Отримуємо запис користувача з KV
+        let userData = (await env.KV.get(`pending_users:${userId}`, { type: "json" })) || null;
+        if (!userData) return new Response("OK", { status: 200 });
 
         // Відправляємо приватне повідомлення користувачу
-        await sendMessage(env.TG_BOT_TOKEN, userId, "Привіт! Введіть номер квартири.");
-      }
+        await sendMessage(env.TG_BOT_TOKEN, userId, 
+          "Привіт! Щоб приєднатися до групи, введіть номер квартири та контактні дані у форматі: Квартира, Ім'я, Телефон"
+        );
 
-      // Відповідаємо на callback
-      await answerCallback(env.TG_BOT_TOKEN, update.callback_query.id, "✅ Введіть дані у приватному чаті!");
+        // Відповідаємо на callback
+        await answerCallback(env.TG_BOT_TOKEN, update.callback_query.id, "✅ Перевірте приватний чат!");
+      }
       return new Response("OK", { status: 200 });
     }
 
-    // --- 3️⃣ Обробка текстових повідомлень користувача ---
+    // --- 3️⃣ Обробка текстових повідомлень у приватному чаті ---
     if (update.message && update.message.text) {
-      const chatId = update.message.chat.id;
       const userId = update.message.from.id;
+      const chatId = update.message.chat.id;
       const text = update.message.text.trim();
 
       let userData = (await env.KV.get(`pending_users:${userId}`, { type: "json" })) || null;
       if (!userData) return new Response("OK", { status: 200 });
 
-      // --- Введення номера квартири ---
+      // --- Введення квартири та контактів ---
       if (userData.status === "pending") {
-        const apartmentNumber = text;
+        const parts = text.split(",").map(s => s.trim());
+        if (parts.length !== 3) {
+          await sendMessage(env.TG_BOT_TOKEN, userId, "❌ Некоректний формат. Введіть: Квартира, Ім'я, Телефон");
+          return new Response("OK", { status: 200 });
+        }
 
+        const [apartmentNumber, name, phone] = parts;
+
+        // Перевірка кількості мешканців на KV
         const residents = (await env.KV.get(`apartments:${apartmentNumber}`, { type: "json" })) || [];
         if (residents.length >= 2) {
-          await sendMessage(env.TG_BOT_TOKEN, userId, "На цю квартиру вже зареєстровано максимальну кількість осіб.");
+          await sendMessage(env.TG_BOT_TOKEN, userId, 
+            "На цю квартиру вже зареєстровано максимальну кількість осіб. Зверніться до адміністратора."
+          );
           return new Response("OK", { status: 200 });
         }
 
-        userData.status = "awaiting_name_phone";
-        userData.apartment = apartmentNumber;
-        await env.KV.put(`pending_users:${userId}`, JSON.stringify(userData));
-
-        await sendMessage(env.TG_BOT_TOKEN, userId, "Введіть ваше ім'я та номер телефону у форматі: Ім'я, Телефон");
-        return new Response("OK", { status: 200 });
-      }
-
-      // --- Введення імені та телефону ---
-      if (userData.status === "awaiting_name_phone") {
-        const parts = text.split(",").map(s => s.trim());
-        if (parts.length !== 2) {
-          await sendMessage(env.TG_BOT_TOKEN, userId, "❌ Некоректний формат. Введіть: Ім'я, Телефон");
-          return new Response("OK", { status: 200 });
-        }
-
-        const [name, phone] = parts;
+        // Генеруємо код для адміністратора
         const adminCode = Math.floor(1000 + Math.random() * 9000);
 
-        userData.name = name;
-        userData.phone = phone;
-        userData.admin_code = adminCode;
-        userData.status = "awaiting_admin_code";
+        // Оновлюємо дані користувача
+        userData = {
+          ...userData,
+          status: "awaiting_admin_code",
+          apartment: apartmentNumber,
+          name,
+          phone,
+          admin_code: adminCode,
+        };
         await env.KV.put(`pending_users:${userId}`, JSON.stringify(userData));
 
-        // Надсилаємо адміністратору
+        // Надсилаємо адміністратору код підтвердження
         const adminId = Number(env.ADMIN_CHAT_ID);
         await sendMessage(env.TG_BOT_TOKEN, adminId, 
-          `Новий учасник:\nІм'я: ${name}\nКвартира: ${userData.apartment}\nТелефон: ${phone}\nКод підтвердження: ${adminCode}`
+          `Новий учасник:\nІм'я: ${name}\nКвартира: ${apartmentNumber}\nТелефон: ${phone}\nКод підтвердження: ${adminCode}`
         );
 
-        await sendMessage(env.TG_BOT_TOKEN, userId, "Ваші дані надіслані адміністратору. Введіть отриманий код підтвердження.");
+        await sendMessage(env.TG_BOT_TOKEN, userId, "Ваші дані надіслані адміністратору. Введіть отриманий код для підтвердження.");
         return new Response("OK", { status: 200 });
       }
 
-      // --- Введення коду адміністратором ---
+      // --- Введення коду підтвердження ---
       if (userData.status === "awaiting_admin_code") {
-        const enteredCode = text;
-        if (enteredCode === String(userData.admin_code)) {
-          // Підтверджуємо користувача
+        if (text === String(userData.admin_code)) {
+          // Код вірний → підтверджуємо користувача
           userData.status = "approved";
           await env.KV.put(`pending_users:${userId}`, JSON.stringify(userData));
 
+          // Додаємо користувача до квартири
           const residents = (await env.KV.get(`apartments:${userData.apartment}`, { type: "json" })) || [];
           residents.push(userId);
           await env.KV.put(`apartments:${userData.apartment}`, JSON.stringify(residents));
 
-          // Знімаємо обмеження
+          // Знімаємо обмеження у групі
           await restrictMember(env.TG_BOT_TOKEN, userData.chat_id, userId, true);
 
-          await sendMessage(env.TG_BOT_TOKEN, userId, `✅ Ви успішно приєднані до групи!`);
+          await sendMessage(env.TG_BOT_TOKEN, userId, "✅ Ви успішно приєднані до групи!");
         } else {
           await sendMessage(env.TG_BOT_TOKEN, userId, "❌ Невірний код. Спробуйте ще раз.");
         }
@@ -126,7 +133,7 @@ export default {
   },
 };
 
-// --- Функції допоміжні ---
+// --- Допоміжні функції ---
 async function sendMessage(token, chatId, text, keyboard) {
   const body = { chat_id: chatId, text };
   if (keyboard) body.reply_markup = keyboard;
@@ -174,7 +181,7 @@ async function restrictMember(token, chatId, userId, unrestrict = false) {
 async function sendJoinMessage(token, chatId, userId, firstName) {
   const keyboard = { inline_keyboard: [[{ text: "✅ Приєднатися", callback_data: `join_${userId}` }]] };
   await sendMessage(token, chatId,
-    `👋 Ласкаво просимо, ${firstName}!\nНатисни кнопку нижче, щоб приєднатися до чату.`,
+    `👋 Ласкаво просимо, ${firstName}!\nНатисніть кнопку нижче, щоб приєднатися до чату.`,
     keyboard
   );
 }
