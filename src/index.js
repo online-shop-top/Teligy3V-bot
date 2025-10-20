@@ -1,188 +1,101 @@
 export default {
   async fetch(request, env) {
-    const TG_API = `https://api.telegram.org/bot${env.TG_BOT_TOKEN}`;
-
-    async function sendMessage(chat_id, text, reply_markup) {
-      const body = { chat_id, text };
-      if (reply_markup) body.reply_markup = reply_markup;
-      await fetch(`${TG_API}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-    }
-
-    async function restrictUser(chat_id, user_id) {
-      await fetch(`${TG_API}/restrictChatMember`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id,
-          user_id,
-          permissions: {
-            can_send_messages: false,
-            can_send_media_messages: false,
-            can_send_other_messages: false,
-            can_add_web_page_previews: false,
-          },
-        }),
-      });
-    }
-
     if (request.method === "POST") {
       const update = await request.json();
+      console.log("Incoming update:", JSON.stringify(update));
 
-      // ОБРОБКА ВИЛУЧЕННЯ КОРИСТУВАЧА ІЗ ГРУПИ
-      if (update.message && update.message.left_chat_member) {
-        const removedUserId = update.message.left_chat_member.id;
-        // Видаляємо дані з KV
-        await env.KV.delete(`pending_users:${removedUserId}`);
+      if (!update.message) return new Response("No message", { status: 200 });
 
-        // Також можна додатково видалити з квартирних списків, якщо потрібно
-        // Для цього можна реалізувати пошук по KV або зберігати індекси
+      const chatId = update.message.chat.id;
+      const userId = update.message.from.id;
+      const text = update.message.text?.trim() || "";
 
+      const kv = env.Teligy3V;
+
+      // Helper для надсилання повідомлень
+      async function sendMessage(to, message) {
+        const url = `https://api.telegram.org/bot${env.TG_BOT_TOKEN}/sendMessage`;
+        const body = { chat_id: to, text: message };
+        const resp = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await resp.text();
+        console.log("Telegram sendMessage response:", data);
+      }
+
+      // Отримуємо стан користувача
+      let pendingData = await kv.get(`pending:${userId}`, "json");
+
+      // 1️⃣ Новий користувач без даних
+      if (!pendingData) {
+        // Додаємо користувача у pending
+        await kv.put(`pending:${userId}`, JSON.stringify({ status: "awaiting_apartment" }));
+        await sendMessage(userId, "Привіт! Щоб приєднатися до групи, введи номер квартири:");
         return new Response("OK", { status: 200 });
       }
 
-      // ОБРОБКА НОВИХ УЧАСНИКІВ
-      if (update.message && update.message.new_chat_members) {
-        for (const member of update.message.new_chat_members) {
-          const chatId = update.message.chat.id;
-          const userId = member.id;
-          const firstName = member.first_name || "Користувач";
-
-          await restrictUser(chatId, userId);
-          const now = new Date().toISOString();
-          await env.KV.put(`pending_users:${userId}`, JSON.stringify({ userId, joinedAt: now, status: "pending", chat_id: chatId }));
-
-          const keyboard = {
-            inline_keyboard: [[{ text: "ПРИЄДНАТИСЬ", callback_data: `join_${userId}` }]],
-          };
-          await sendMessage(chatId, `👋 Привіт, ${firstName}!\nНатисни кнопку нижче, щоб подати заявку на приєднання.`, keyboard);
+      // 2️⃣ Очікуємо номер квартири
+      if (pendingData.status === "awaiting_apartment") {
+        const apartmentNumber = text;
+        // Перевіряємо кількість зареєстрованих на цю квартиру
+        const existing = await kv.get(`apartment:${apartmentNumber}`, "json") || [];
+        if (existing.length >= 2) {
+          await sendMessage(userId, "На цю квартиру вже зареєстровано максимальну кількість осіб. Зверніться до адміністратора.");
+          return new Response("OK", { status: 200 });
         }
+        pendingData = { status: "awaiting_contact", apartmentNumber };
+        await kv.put(`pending:${userId}`, JSON.stringify(pendingData));
+        await sendMessage(userId, "Введи своє ім'я та номер телефону (через кому):");
         return new Response("OK", { status: 200 });
       }
 
-      // ОБРОБКА НАТИСКАННЯ КНОПКИ "ПРИЄДНАТИСЬ"
-      if (update.callback_query) {
-        const data = update.callback_query.data;
-        const chatId = update.callback_query.message.chat.id;
-        const userId = update.callback_query.from.id;
-        const messageId = update.callback_query.message.message_id;
-
-        if (data === `join_${userId}`) {
-          let userData = JSON.parse(await env.KV.get(`pending_users:${userId}`)) || {};
-          userData.status = "awaiting_apartment";
-          await env.KV.put(`pending_users:${userId}`, JSON.stringify(userData));
-
-          await sendMessage(userId, "Привіт! Щоб приєднатися до групи, введи номер квартири (від 1 до 120).");
-
-          await fetch(`${TG_API}/answerCallbackQuery`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              callback_query_id: update.callback_query.id,
-              text: "✅ Тепер введи номер квартири у приватному чаті.",
-              show_alert: false,
-            }),
-          });
-
-          await fetch(`${TG_API}/deleteMessage`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ chat_id: chatId, message_id: messageId }),
-          });
+      // 3️⃣ Очікуємо ім'я та телефон
+      if (pendingData.status === "awaiting_contact") {
+        const [name, phone] = text.split(",").map(s => s.trim());
+        if (!name || !phone) {
+          await sendMessage(userId, "Будь ласка, введи ім'я та телефон через кому, наприклад: Іван, 0501234567");
+          return new Response("OK", { status: 200 });
         }
+
+        // Генеруємо 4-значний код
+        const code = Math.floor(1000 + Math.random() * 9000).toString();
+
+        pendingData = { status: "awaiting_code", apartmentNumber: pendingData.apartmentNumber, name, phone, code };
+        await kv.put(`pending:${userId}`, JSON.stringify(pendingData));
+
+        // Надсилаємо код тобі (адміністратору)
+        await sendMessage(env.ADMIN_CHAT_ID, `Новий учасник:\nІм'я: ${name}\nКвартира: ${pendingData.apartmentNumber}\nТелефон: ${phone}\nКод підтвердження: ${code}`);
+        await sendMessage(userId, "Тепер введи код підтвердження, який тобі повідомив адміністратор:");
         return new Response("OK", { status: 200 });
       }
 
-      // ОБРОБКА ПРИВАТНИХ ПОВІДОМЛЕНЬ
-      if (update.message && update.message.chat.type === "private") {
-        const userId = update.message.from.id;
-        const text = (update.message.text || "").trim();
+      // 4️⃣ Очікуємо код підтвердження
+      if (pendingData.status === "awaiting_code") {
+        if (text === pendingData.code) {
+          // Змінюємо статус на approved
+          pendingData.status = "approved";
+          await kv.put(`pending:${userId}`, JSON.stringify(pendingData));
 
-        const userRaw = await env.KV.get(`pending_users:${userId}`);
-        if (!userRaw) return new Response("OK", { status: 200 });
+          // Додаємо користувача до квартири
+          const apartmentKey = `apartment:${pendingData.apartmentNumber}`;
+          const existing = await kv.get(apartmentKey, "json") || [];
+          existing.push({ userId, name: pendingData.name, phone: pendingData.phone });
+          await kv.put(apartmentKey, JSON.stringify(existing));
 
-        const userData = JSON.parse(userRaw);
-
-        if (userData.status === "awaiting_apartment") {
-          const apartmentNumber = Number(text);
-          if (isNaN(apartmentNumber) || apartmentNumber < 1 || apartmentNumber > 120) {
-            await sendMessage(userId, "Такого номеру квартири не існує. Спробуйте ще раз.");
-            return new Response("OK", { status: 200 });
-          }
-
-          const residents = (await env.KV.get(`apartments:${apartmentNumber}`, { type: "json" })) || [];
-          if (residents.length >= 2) {
-            await sendMessage(userId, "На цю квартиру вже зареєстровано максимальну кількість осіб. Зверніться до адміністратора.");
-            return new Response("OK", { status: 200 });
-          }
-
-          userData.status = "awaiting_name_phone";
-          userData.apartment = apartmentNumber;
-          await env.KV.put(`pending_users:${userId}`, JSON.stringify(userData));
-          await sendMessage(userId, "Введіть ваше ім'я та номер телефону у форматі: Ім'я, Телефон");
+          await sendMessage(userId, "✅ Ви успішно приєднані до групи!");
           return new Response("OK", { status: 200 });
-        }
-
-        if (userData.status === "awaiting_name_phone") {
-          const parts = text.split(",").map(s => s.trim());
-          if (parts.length < 2) {
-            await sendMessage(userId, "Будь ласка, введіть ім'я та телефон у форматі: Ім'я, Телефон");
-            return new Response("OK", { status: 200 });
-          }
-          const [name, phone] = parts;
-          userData.name = name;
-          userData.phone = phone;
-
-          const adminCode = Math.floor(1000 + Math.random() * 9000);
-          userData.admin_code = adminCode;
-          userData.status = "awaiting_code";
-          await env.KV.put(`pending_users:${userId}`, JSON.stringify(userData));
-
-          const adminId = Number(env.ADMIN_CHAT_ID);
-          await sendMessage(adminId, `Новий учасник:\nІм'я: ${name}\nКвартира: ${userData.apartment}\nТелефон: ${phone}\nКод підтвердження: ${adminCode}`);
-          await sendMessage(userId, "Ваші дані відправлені адміністратору. Введіть отриманий код підтвердження.");
-          return new Response("OK", { status: 200 });
-        }
-
-        if (userData.status === "awaiting_code") {
-          if (text === String(userData.admin_code)) {
-            userData.status = "approved";
-
-            const residents = (await env.KV.get(`apartments:${userData.apartment}`, { type: "json" })) || [];
-            residents.push(userId);
-            await env.KV.put(`apartments:${userData.apartment}`, JSON.stringify(residents));
-            await env.KV.put(`pending_users:${userId}`, JSON.stringify(userData));
-
-            // Зняти обмеження прав
-            await fetch(`${TG_API}/restrictChatMember`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                chat_id: userData.chat_id,
-                user_id: userId,
-                permissions: {
-                  can_send_messages: true,
-                  can_send_media_messages: true,
-                  can_send_polls: true,
-                  can_send_other_messages: true,
-                  can_add_web_page_previews: true,
-                  can_invite_users: true,
-                },
-              }),
-            });
-
-            await sendMessage(userId, "✅ Ви успішно приєднані до групи!");
-          } else {
-            await sendMessage(userId, "❌ Невірний код. Спробуйте ще раз.");
-          }
+        } else {
+          await sendMessage(userId, "❌ Невірний код. Спробуйте ще раз.");
           return new Response("OK", { status: 200 });
         }
       }
+
+      return new Response("OK", { status: 200 });
     }
 
-    return new Response("OK", { status: 200 });
+    // Для GET запитів
+    return new Response("Hello from Worker!", { status: 200 });
   },
 };
