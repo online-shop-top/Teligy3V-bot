@@ -1,12 +1,12 @@
-name = "osbb-bot"
+name = "teligy3v-bot"
 main = "src/index.js"
 compatibility_date = "2024-10-01"
-account_id = "86e97485017fdd3df450c1d758ce1b36"  # 👈 сюди встав свій реальний ID
+account_id = "86e97485017fdd3df450c1d758ce1b36"  # не залишати порожнім
 
 [vars]
-TG_BOT_TOKEN = ""
-TG_SECRET_TOKEN = ""
+TG_BOT_TOKEN = "${{ secrets.TG_BOT_TOKEN }}"
+TG_SECRET_TOKEN = "${{ secrets.TG_SECRET_TOKEN }}"
 
 [[kv_namespaces]]
 binding = "Teligy3V"
-id = "be029e33b2b447e2befdf57751d20343"
+id = "be029e33b2b447e2befdf57751d20343"  # вставити скопійований ID
