@@ -29,6 +29,37 @@ export default {
           }
         }
 
+        // Кодове слово для тестування
+        if (text.toLowerCase() === "тестбот") {
+          await sendMessage(userId, "🚀 Починаємо повне тестування логіки бота...");
+
+          let testApartment = "123";
+          let testName = "Тестовий Користувач";
+          let testPhone = "+380501234567";
+          let testCode = Math.floor(1000 + Math.random() * 9000).toString();
+
+          await kv.put(`pending:${userId}`, JSON.stringify({ status: "awaiting_apartment" }));
+          await sendMessage(userId, `Тест: Чекаємо номер квартири (імітація)`);
+
+          // Імітація введення номера квартири
+          await kv.put(`pending:${userId}`, JSON.stringify({ status: "awaiting_contact", apartmentNumber: testApartment }));
+          await sendMessage(userId, `Тест: Введено номер квартири: ${testApartment}`);
+
+          // Імітація введення ім'я та телефон
+          await kv.put(`pending:${userId}`, JSON.stringify({ status: "awaiting_code", apartmentNumber: testApartment, name: testName, phone: testPhone, code: testCode  }));
+          await sendMessage(userId, `Тест: Введено ім'я та телефон: ${testName}, ${testPhone}`);
+
+          // Підтвердження коду
+          await kv.put(`pending:${userId}`, JSON.stringify({ status: "approved", apartmentNumber: testApartment, name: testName, phone: testPhone }));
+          const apartmentKey = `apartment:${testApartment}`;
+          const existing = (await kv.get(apartmentKey, "json")) || [];
+          existing.push({ userId, name: testName, phone: testPhone });
+          await kv.put(apartmentKey, JSON.stringify(existing));
+
+          await sendMessage(userId, `✅ Тестування пройшло успішно! Ваш код підтвердження був '${testCode}'. Основні функції працюють.`);
+          return new Response("OK", { status: 200 });
+        }
+
         let pendingData = await kv.get(`pending:${userId}`, "json");
 
         if (!pendingData) {
@@ -39,7 +70,6 @@ export default {
 
         if (pendingData.status === "awaiting_apartment") {
           const apartmentNumber = text;
-          // Додаткова валідація номера квартири
           if (!/^\d+$/.test(apartmentNumber)) {
             await sendMessage(userId, "Будь ласка, введи коректний номер квартири (тільки цифри).");
             return new Response("OK", { status: 200 });
