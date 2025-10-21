@@ -3,43 +3,35 @@ name: Deploy Worker
 on:
   push:
     branches:
-      - main
-  workflow_dispatch:
+      - main   # 🚀 Автоматично деплоїмо при пуші в гілку main
+  workflow_dispatch:  # 👈 Дозволяє запустити вручну
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
+      # 1️⃣ Отримуємо код репозиторію
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2️⃣ Встановлюємо Node.js (необхідно для Wrangler)
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          # cache: "npm"  <-- 🔴 прибрано, бо немає lock-файлу
 
+      # 3️⃣ Встановлюємо залежності (якщо є package.json)
+      - name: Install dependencies
+        run: |
+          if [ -f package.json ]; then
+            npm install
+          fi
+
+      # 4️⃣ Деплой через Wrangler
       - name: Deploy to Cloudflare Workers
-        id: deploy
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
           command: publish
-
-      # ✅ Надсилання повідомлення в Telegram після успішного деплою
-      - name: Notify success in Telegram
-        if: success()
-        run: |
-          curl -s -X POST https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendMessage \
-            -H "Content-Type: application/json" \
-            -d '{"chat_id": "${{ secrets.ADMIN_CHAT_ID }}", "text": "✅ Cloudflare Worker успішно задеплоєно!"}'
-
-      # ❌ Надсилання повідомлення, якщо деплой не вдався
-      - name: Notify failure in Telegram
-        if: failure()
-        run: |
-          curl -s -X POST https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendMessage \
-            -H "Content-Type: application/json" \
-            -d '{"chat_id": "${{ secrets.ADMIN_CHAT_ID }}", "text": "❌ Помилка при деплої Cloudflare Worker!"}'
