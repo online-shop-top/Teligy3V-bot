@@ -1,12 +1,18 @@
-name = "Teligy3V-bot"
+name = "teligy3v-bot"
 main = "src/index.js"
 compatibility_date = "2025-10-16"
-account_id = "86e97485017fdd3df450c1d758ce1b37"
-
-[vars]
-TG_BOT_TOKEN = "${{ secrets.TG_BOT_TOKEN }}"
-TG_SECRET_TOKEN = "${{ secrets.TG_SECRET_TOKEN }}"
+account_id = "86e97485017fdd3df450c1d758ce1b36"
 
 [[kv_namespaces]]
 binding = "Teligy3V"
-id = "be029e33b2b447e2befdf57751d20344"
+id = "be029e33b2b447e2befdf57751d20343"
+
+[observability]
+enabled = false
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
