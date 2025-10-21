@@ -18,10 +18,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: "npm"
-
-      - name: Install dependencies
-        run: npm ci
+          # cache: "npm"  <-- 🔴 прибрано, бо немає lock-файлу
 
       - name: Deploy to Cloudflare Workers
         id: deploy
@@ -31,9 +28,18 @@ jobs:
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
           command: publish
 
-      - name: Notify in Telegram
+      # ✅ Надсилання повідомлення в Telegram після успішного деплою
+      - name: Notify success in Telegram
         if: success()
         run: |
-          curl -s -X POST https://api.telegram.org/bot${{ secrets.TG_NOTIFY_TOKEN }}/sendMessage \
+          curl -s -X POST https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendMessage \
             -H "Content-Type: application/json" \
-            -d '{"chat_id": "${{ secrets.TG_NOTIFY_CHAT_ID }}", "text": "✅ Cloudflare Worker успішно задеплоєно!"}'
+            -d '{"chat_id": "${{ secrets.ADMIN_CHAT_ID }}", "text": "✅ Cloudflare Worker успішно задеплоєно!"}'
+
+      # ❌ Надсилання повідомлення, якщо деплой не вдався
+      - name: Notify failure in Telegram
+        if: failure()
+        run: |
+          curl -s -X POST https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendMessage \
+            -H "Content-Type: application/json" \
+            -d '{"chat_id": "${{ secrets.ADMIN_CHAT_ID }}", "text": "❌ Помилка при деплої Cloudflare Worker!"}'
