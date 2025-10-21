@@ -3,32 +3,29 @@ name: Deploy Worker
 on:
   push:
     branches:
-      - main   # 🚀 Автоматично деплоїмо при пуші в гілку main
-  workflow_dispatch:  # 👈 Дозволяє запустити вручну
+      - main
+  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Отримуємо код репозиторію
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣ Встановлюємо Node.js (необхідно для Wrangler)
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: "npm"
 
-      # 3️⃣ Встановлюємо залежності (якщо є package.json)
       - name: Install dependencies
         run: |
           if [ -f package.json ]; then
-            npm install
+            npm ci
           fi
 
-      # 4️⃣ Деплой через Wrangler
       - name: Deploy to Cloudflare Workers
         uses: cloudflare/wrangler-action@v3
         with:
