@@ -1,116 +1,111 @@
 export default {
   async fetch(request, env) {
-    // Обробляємо лише POST-запити від Telegram
     if (request.method === "POST") {
       try {
         const update = await request.json();
-        console.log("Incoming update:", JSON.stringify(update).slice(0, 500));
-
-        if (!update.message) return new Response("No message", { status: 200 });
-
-        const chat = update.message.chat;
-        const user = update.message.from;
-        const chatId = chat.id;
-        const userId = user.id;
-        const text = update.message.text?.trim() || "";
+        console.log("Incoming:", JSON.stringify(update).slice(0, 500));
 
         const kv = env.Teligy3V;
 
-        // 🧩 Хелпер для відправки повідомлень
-        async function sendMessage(to, message) {
+        // === Хелпер: надсилання повідомлень ===
+        async function sendMessage(to, text, extra = {}) {
           const url = `https://api.telegram.org/bot${env.TG_BOT_TOKEN}/sendMessage`;
-          const body = { chat_id: to, text: message };
+          const body = { chat_id: to, text, ...extra };
           const resp = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
           });
           const data = await resp.text();
-          console.log("Telegram response:", data.slice(0, 300));
+          console.log("Telegram resp:", data.slice(0, 200));
         }
 
-        // 🚫 Якщо не текстове повідомлення
-        if (!text) {
-          await sendMessage(chatId, "Будь ласка, надішли текстове повідомлення.");
+        // === Хелпер: зберегти заявку з терміном дії ===
+        async function savePending(userId, data) {
+          // додаємо timestamp для автоочищення
+          data.timestamp = Date.now();
+          await kv.put(`pending:${userId}`, JSON.stringify(data));
+        }
+
+        // === Хелпер: перевірка терміну дії заявки ===
+        async function isExpired(pending) {
+          const EXPIRATION_MS = 24 * 60 * 60 * 1000; // 24 години
+          return Date.now() - (pending.timestamp || 0) > EXPIRATION_MS;
+        }
+
+        // === Початок приєднання (/start join) ===
+        if (update.message?.text === "/start join") {
+          const chatId = update.message.chat.id;
+          const userId = update.message.from.id;
+
+          await kv.delete(`pending:${userId}`);
+
+          const joinButton = {
+            reply_markup: {
+              inline_keyboard: [[{ text: "🔑 Приєднатися до групи", callback_data: "start_join_process" }]],
+            },
+          };
+
+          await sendMessage(chatId, "Вітаємо! Натисніть кнопку нижче, щоб подати заявку на приєднання 👇", joinButton);
           return new Response("OK", { status: 200 });
         }
 
-        // 🔹 Отримуємо збережені дані користувача
-        let pendingData = await kv.get(`pending:${userId}`);
-        if (pendingData) pendingData = JSON.parse(pendingData);
+        // === Якщо натиснули кнопку “Приєднатися” ===
+        if (update.callback_query?.data === "start_join_process") {
+          const userId = update.callback_query.from.id;
+          const chatId = userId;
 
-        // 1️⃣ Новий користувач
-        if (!pendingData) {
-          await kv.put(`pending:${userId}`, JSON.stringify({ status: "awaiting_apartment" }));
-          await sendMessage(chatId, "Привіт! Щоб приєднатися до групи, введи номер квартири:");
+          await savePending(userId, { status: "awaiting_apartment" });
+          await sendMessage(chatId, "Введіть номер квартири:");
           return new Response("OK", { status: 200 });
         }
 
-        // 2️⃣ Очікуємо номер квартири
-        if (pendingData.status === "awaiting_apartment") {
-          const apartmentNumber = text;
-          const existingRaw = await kv.get(`apartment:${apartmentNumber}`);
-          const existing = existingRaw ? JSON.parse(existingRaw) : [];
+        // === Обробка звичайних повідомлень ===
+        if (update.message) {
+          const msg = update.message;
+          const chatId = msg.chat.id;
+          const userId = msg.from.id;
+          const text = msg.text?.trim() || "";
 
-          if (existing.length >= 2) {
-            await sendMessage(chatId, "На цю квартиру вже зареєстровано максимальну кількість осіб. Зверніться до адміністратора.");
+          let pendingRaw = await kv.get(`pending:${userId}`);
+          if (!pendingRaw) {
+            await sendMessage(chatId, "Для початку натисніть /start join");
             return new Response("OK", { status: 200 });
           }
 
-          pendingData = { status: "awaiting_contact", apartmentNumber };
-          await kv.put(`pending:${userId}`, JSON.stringify(pendingData));
-          await sendMessage(chatId, "Введи своє ім'я та номер телефону (через кому):");
-          return new Response("OK", { status: 200 });
-        }
+          let pending = JSON.parse(pendingRaw);
 
-        // 3️⃣ Очікуємо ім’я та телефон
-        if (pendingData.status === "awaiting_contact") {
-          const [name, phone] = text.split(",").map(s => s.trim());
-          if (!name || !phone) {
-            await sendMessage(chatId, "Будь ласка, введи ім’я та телефон через кому, наприклад: Іван, 0501234567");
+          // Якщо заявка прострочена — видаляємо
+          if (await isExpired(pending)) {
+            await kv.delete(`pending:${userId}`);
+            await sendMessage(chatId, "⏰ Термін дії вашої заявки минув. Почніть заново командою /start join.");
             return new Response("OK", { status: 200 });
           }
 
-          const code = Math.floor(1000 + Math.random() * 9000).toString();
-          pendingData = { status: "awaiting_code", apartmentNumber: pendingData.apartmentNumber, name, phone, code };
-          await kv.put(`pending:${userId}`, JSON.stringify(pendingData));
-
-          await sendMessage(env.ADMIN_CHAT_ID, 
-            `🏠 Новий учасник:\nІм’я: ${name}\nКвартира: ${pendingData.apartmentNumber}\nТелефон: ${phone}\nКод підтвердження: ${code}`
-          );
-          await sendMessage(chatId, "Тепер введи код підтвердження, який тобі повідомив адміністратор:");
-          return new Response("OK", { status: 200 });
-        }
-
-        // 4️⃣ Очікуємо код підтвердження
-        if (pendingData.status === "awaiting_code") {
-          if (text === pendingData.code) {
-            pendingData.status = "approved";
-            await kv.put(`pending:${userId}`, JSON.stringify(pendingData));
-
-            const apartmentKey = `apartment:${pendingData.apartmentNumber}`;
-            const existingRaw = await kv.get(apartmentKey);
-            const existing = existingRaw ? JSON.parse(existingRaw) : [];
-
-            existing.push({ userId, name: pendingData.name, phone: pendingData.phone });
-            await kv.put(apartmentKey, JSON.stringify(existing));
-
-            await sendMessage(chatId, "✅ Ви успішно приєднані до групи!");
-            return new Response("OK", { status: 200 });
-          } else {
-            await sendMessage(chatId, "❌ Невірний код. Спробуйте ще раз.");
+          // 1️⃣ Очікуємо номер квартири
+          if (pending.status === "awaiting_apartment") {
+            pending.apartment = text;
+            pending.status = "awaiting_contact";
+            await savePending(userId, pending);
+            await sendMessage(chatId, "Введіть ваше ім’я та номер телефону (через кому):");
             return new Response("OK", { status: 200 });
           }
-        }
 
-        return new Response("OK", { status: 200 });
-      } catch (err) {
-        console.error("❌ Error:", err);
-        return new Response("Internal error", { status: 500 });
-      }
-    }
+          // 2️⃣ Очікуємо ім’я та телефон
+          if (pending.status === "awaiting_contact") {
+            const [name, phone] = text.split(",").map((s) => s.trim());
+            if (!name || !phone) {
+              await sendMessage(chatId, "Будь ласка, введіть ім’я та телефон через кому, наприклад:\nІван, 0501234567");
+              return new Response("OK", { status: 200 });
+            }
 
-    // Для GET-запитів (наприклад, перевірка стану)
-    return new Response("Hello from Worker!", { status: 200 });
-  },
-};
+            const code = Math.floor(1000 + Math.random() * 9000).toString();
+            pending.name = name;
+            pending.phone = phone;
+            pending.code = code;
+            pending.status = "awaiting_code";
+            await savePending(userId, pending);
+
+            await sendMessage(
+              env.ADMIN_CHAT_ID,
+              `🏠 Нова заявка на приєднання:\nІм’я: ${name}\nТелефон: ${phone}\nКварт
