@@ -5,8 +5,9 @@ account_id = "86e97485017fdd3df450c1d758ce1b36"
 
 [vars]
 TG_BOT_TOKEN = "${{ secrets.TG_BOT_TOKEN }}"
-ADMIN_CHAT_ID = "${{ secrets.ADMIN_CHAT_ID }}"
+ADMIN_CHAT_ID = "2102040810"
 BOT_USERNAME = "teligy3v_bot"
+GROUP_CHAT_ID = "-1003153302816"
 GROUP_INVITE_URL = "https://t.me/+6_OJtJfRHSZjZjQy"
 
 [[kv_namespaces]]
