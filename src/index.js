@@ -65,4 +65,3 @@ export default {
     return new Response("Hello from Worker!", { status: 200 });
   },
 };
-
