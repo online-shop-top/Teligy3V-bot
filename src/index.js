@@ -5,52 +5,47 @@ export default {
 
       if (update.message) {
         const chatId = update.message.chat.id;
-        const firstName = update.message.from.first_name || "користувач";
-        const text = update.message.text || "";
+        const userId = update.message.from.id;
+        const text = (update.message.text || "").trim();
 
-        // При команді /start надсилаємо вітання та кнопку
         if (text === "/start") {
-          const keyboard = {
-            inline_keyboard: [
-              [{ text: "ПРИЄДНАТИСЬ", callback_data: "join_request" }],
-            ],
-          };
+          // тут код першого кроку (вітання з кнопкою)
+        } else {
+          const aptNum = parseInt(text, 10);
+          if (Number.isNaN(aptNum) || aptNum < 1 || aptNum > 120) {
+            await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/sendMessage`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                chat_id: chatId,
+                text: "Такого номеру квартири не існує. Спробуйте ще раз.",
+              }),
+            });
+          } else {
+            await env.Teligy3V.put(String(userId), String(aptNum));
 
-          await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/sendMessage`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              chat_id: chatId,
-              text: `👋 Привіт, ${firstName}!\nНатисни кнопку нижче, щоб подати заявку на приєднання до групи`,
-              reply_markup: keyboard,
-            }),
-          });
+            await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/sendMessage`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                chat_id: chatId,
+                text: `Номер квартири ${aptNum} успішно збережено!`,
+              }),
+            });
 
-          return new Response("OK", { status: 200 });
+            // Подальша логіка тут
+          }
         }
+        return new Response("OK", { status: 200 });
       }
 
       if (update.callback_query) {
-        const chatId = update.callback_query.from.id;
-        const data = update.callback_query.data;
-
-        if (data === "join_request") {
-          await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/sendMessage`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              chat_id: chatId,
-              text: "Привіт! Щоб приєднатися до групи, введи номер квартири",
-            }),
-          });
-
-          return new Response("OK", { status: 200 });
-        }
+        // ваш код обробки callback_query
+        return new Response("OK", { status: 200 });
       }
 
       return new Response("OK", { status: 200 });
     }
-
     return new Response("Hello from Worker!", { status: 200 });
   },
 };
