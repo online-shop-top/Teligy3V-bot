@@ -1,116 +1,80 @@
 export default {
   async fetch(request, env) {
-    // Обробляємо лише POST-запити від Telegram
-    if (request.method === "POST") {
-      try {
-        const update = await request.json();
-        console.log("Incoming update:", JSON.stringify(update).slice(0, 500));
+    if (request.method !== 'POST') return new Response('OK');
 
-        if (!update.message) return new Response("No message", { status: 200 });
+    const secretHdr = request.headers.get('x-telegram-bot-api-secret-token');
+    if (secretHdr !== env.TG_SECRET_TOKEN) return new Response('Forbidden', { status: 403 });
 
-        const chat = update.message.chat;
-        const user = update.message.from;
-        const chatId = chat.id;
-        const userId = user.id;
-        const text = update.message.text?.trim() || "";
+    const update = await request.json().catch(() => null);
+    if (!update || !update.message) return new Response('OK');
 
-        const kv = env.Teligy3V;
+    const chatId = update.message.chat.id;
+    const text = update.message.text?.trim();
+    const stateKey = `state_${chatId}`;
 
-        // 🧩 Хелпер для відправки повідомлень
-        async function sendMessage(to, message) {
-          const url = `https://api.telegram.org/bot${env.TG_BOT_TOKEN}/sendMessage`;
-          const body = { chat_id: to, text: message };
-          const resp = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
+    // отримати або ініціалізувати state користувача
+    const state = JSON.parse(await env.USERS.get(stateKey) || '{}');
+
+    let reply = '';
+
+    if (!state.step) {
+      reply = 'Вітаю! Вкажіть номер вашої квартири (1–120):';
+      state.step = 'flat';
+    } else if (state.step === 'flat') {
+      const flat = parseInt(text);
+      if (isNaN(flat) || flat < 1 || flat > 120) {
+        reply = '❌ Невірний номер квартири. Вкажіть число від 1 до 120:';
+      } else {
+        state.flat = flat;
+        state.step = 'name';
+        reply = '✅ Прийнято! Тепер введіть ваше ім’я:';
+      }
+    } else if (state.step === 'name') {
+      state.name = text;
+      state.step = 'phone';
+      reply = '📞 Вкажіть номер телефону (наприклад, +380501234567):';
+    } else if (state.step === 'phone') {
+      const phone = text.replace(/\s+/g, '');
+      if (!phone.match(/^\+?\d{10,13}$/)) {
+        reply = '❌ Невірний формат телефону. Спробуйте ще раз:';
+      } else {
+        state.phone = phone;
+
+        // Завантажуємо поточних користувачів
+        let usersData = JSON.parse(await env.USERS.get('users') || '{}');
+        const flatUsers = usersData[state.flat] || [];
+
+        if (flatUsers.length >= 2) {
+          reply = '🚫 Ліміт: у квартирі вже зареєстровано 2 особи.';
+        } else {
+          flatUsers.push({
+            name: state.name,
+            phone: state.phone,
+            chatId,
+            registered: new Date().toISOString()
           });
-          const data = await resp.text();
-          console.log("Telegram response:", data.slice(0, 300));
+          usersData[state.flat] = flatUsers;
+
+          await env.USERS.put('users', JSON.stringify(usersData));
+          reply = `🎉 Дякуємо, ${state.name}! Вас зареєстровано для квартири №${state.flat}.`;
         }
 
-        // 🚫 Якщо не текстове повідомлення
-        if (!text) {
-          await sendMessage(chatId, "Будь ласка, надішли текстове повідомлення.");
-          return new Response("OK", { status: 200 });
-        }
-
-        // 🔹 Отримуємо збережені дані користувача
-        let pendingData = await kv.get(`pending:${userId}`);
-        if (pendingData) pendingData = JSON.parse(pendingData);
-
-        // 1️⃣ Новий користувач
-        if (!pendingData) {
-          await kv.put(`pending:${userId}`, JSON.stringify({ status: "awaiting_apartment" }));
-          await sendMessage(chatId, "Привіт! Щоб приєднатися до групи, введи номер квартири:");
-          return new Response("OK", { status: 200 });
-        }
-
-        // 2️⃣ Очікуємо номер квартири
-        if (pendingData.status === "awaiting_apartment") {
-          const apartmentNumber = text;
-          const existingRaw = await kv.get(`apartment:${apartmentNumber}`);
-          const existing = existingRaw ? JSON.parse(existingRaw) : [];
-
-          if (existing.length >= 2) {
-            await sendMessage(chatId, "На цю квартиру вже зареєстровано максимальну кількість осіб. Зверніться до адміністратора.");
-            return new Response("OK", { status: 200 });
-          }
-
-          pendingData = { status: "awaiting_contact", apartmentNumber };
-          await kv.put(`pending:${userId}`, JSON.stringify(pendingData));
-          await sendMessage(chatId, "Введи своє ім'я та номер телефону (через кому):");
-          return new Response("OK", { status: 200 });
-        }
-
-        // 3️⃣ Очікуємо ім’я та телефон
-        if (pendingData.status === "awaiting_contact") {
-          const [name, phone] = text.split(",").map(s => s.trim());
-          if (!name || !phone) {
-            await sendMessage(chatId, "Будь ласка, введи ім’я та телефон через кому, наприклад: Іван, 0501234567");
-            return new Response("OK", { status: 200 });
-          }
-
-          const code = Math.floor(1000 + Math.random() * 9000).toString();
-          pendingData = { status: "awaiting_code", apartmentNumber: pendingData.apartmentNumber, name, phone, code };
-          await kv.put(`pending:${userId}`, JSON.stringify(pendingData));
-
-          await sendMessage(env.ADMIN_CHAT_ID, 
-            `🏠 Новий учасник:\nІм’я: ${name}\nКвартира: ${pendingData.apartmentNumber}\nТелефон: ${phone}\nКод підтвердження: ${code}`
-          );
-          await sendMessage(chatId, "Тепер введи код підтвердження, який тобі повідомив адміністратор:");
-          return new Response("OK", { status: 200 });
-        }
-
-        // 4️⃣ Очікуємо код підтвердження
-        if (pendingData.status === "awaiting_code") {
-          if (text === pendingData.code) {
-            pendingData.status = "approved";
-            await kv.put(`pending:${userId}`, JSON.stringify(pendingData));
-
-            const apartmentKey = `apartment:${pendingData.apartmentNumber}`;
-            const existingRaw = await kv.get(apartmentKey);
-            const existing = existingRaw ? JSON.parse(existingRaw) : [];
-
-            existing.push({ userId, name: pendingData.name, phone: pendingData.phone });
-            await kv.put(apartmentKey, JSON.stringify(existing));
-
-            await sendMessage(chatId, "✅ Ви успішно приєднані до групи!");
-            return new Response("OK", { status: 200 });
-          } else {
-            await sendMessage(chatId, "❌ Невірний код. Спробуйте ще раз.");
-            return new Response("OK", { status: 200 });
-          }
-        }
-
-        return new Response("OK", { status: 200 });
-      } catch (err) {
-        console.error("❌ Error:", err);
-        return new Response("Internal error", { status: 500 });
+        // завершимо сесію
+        await env.USERS.delete(stateKey);
       }
     }
 
-    // Для GET-запитів (наприклад, перевірка стану)
-    return new Response("Hello from Worker!", { status: 200 });
-  },
+    // зберегти поточний стан
+    await env.USERS.put(stateKey, JSON.stringify(state));
+
+    // відправити відповідь користувачу
+    await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: reply })
+    });
+
+    return new Response('OK');
+  }
 };
+
