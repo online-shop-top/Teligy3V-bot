@@ -1,21 +1,22 @@
-name: Deploy Worker
+name = "teligy3v-bot"
+main = "src/index.js"
+compatibility_date = "2025-10-16"
+account_id = "86e97485017fdd3df450c1d758ce1b36"
 
-on:
-  push:
-    branches:
-      - main
+[vars]
+TG_BOT_TOKEN = "${{ secrets.TG_BOT_TOKEN }}"
+ADMIN_CHAT_ID = "${{ secrets.ADMIN_CHAT_ID }}"
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+[[kv_namespaces]]
+binding = "Teligy3V"
+id = "be029e33b2b447e2befdf57751d20343"
 
-      - name: Install Wrangler
-        run: npm install -g wrangler
+[observability]
+enabled = false
+head_sampling_rate = 1
 
-      - name: Publish to Cloudflare
-        run: wrangler deploy
-        env:
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
