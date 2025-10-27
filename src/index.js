@@ -42,7 +42,7 @@ export default {
 
     // Крок 2: кнопка приєднання
     if (update.callback_query?.data === "join_request") {
-      await sendMessage(chatId, "Привіт! Щоб приєднатися до групи, введи номер квартири.");
+      await sendMessage(chatId, "Введи номер квартири.");
       await env.Teligy3V.put(`state:${userId}`, JSON.stringify({ step: "awaiting_apartment" }));
       return new Response("OK");
     }
