@@ -1,14 +1,14 @@
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") {
-      // опціонально CORS
       return new Response(null, { headers: { "Access-Control-Allow-Origin": "*" } });
     }
+
     if (request.headers.get("CF-Worker-Cron") === "true") {
-      // Крон-триггер для видалення неактивних
       await removeInactiveUsers(env);
-      return new Response("Cron run OK");
+      return new Response("Cron job completed");
     }
+
     if (request.method !== "POST") {
       return new Response("Method Not Allowed", { status: 405 });
     }
@@ -29,16 +29,15 @@ export default {
     if (!userId) return new Response("OK");
     const chatId = update.message?.chat?.id || update.callback_query?.from?.id;
 
-    // Обновлюємо час останньої активності
+    // Оновлюємо час останньої активності
     await env.Teligy3V.put(`last_active:${userId}`, Date.now().toString());
 
-    // Менеджмент стану
     let userStateRaw = await env.Teligy3V.get(`state:${userId}`);
     let userState = null;
     try { userState = userStateRaw ? JSON.parse(userStateRaw) : null; } catch { userState = null; }
 
     if (update.message?.text === "/start") {
-      const firstName = update.message.from.first_name || "Користувач";
+      const firstName = update.message.from.first_name || "користувач";
       await sendMessage(chatId,
         `👋 Привіт, ${firstName}!\nНатисни кнопку нижче, щоб подати заявку на приєднання до групи.`,
         { inline_keyboard: [[{ text: "ПРИЄДНАТИСЬ", callback_data: "join_request" }]] }
@@ -48,7 +47,53 @@ export default {
     }
 
     if (update.callback_query?.data === "join_request") {
-      await sendMessage(chatId, "Введи номер квартири.");
+      // Правила чату з кнопкою ПОГОДЖУЮСЬ
+      const rulesText = `
+Мета чату:
+Комунікація, опитування, оперативного інформування про важливі події, аварії, рішення по будинку тощо.
+Не для політики, реклами чи особистих суперечок.
+
+Поважай сусідів
+– Без образ, хамства чи принижень.
+– Критика має бути конструктивною.
+– Особисті суперечки — у приват.
+
+Заборонено:
+ Політичні, релігійні, воєнні теми
+ Реклама, спам, продаж без дозволу
+ Неперевірена інформація
+ Мати, образливі жарти, токсичність
+
+Тематика чату:
+ Будинок, комунальні послуги, ремонти
+ Благоустрій, аварії, збори
+ Важливі повідомлення
+
+(Інші теми — в окремих чатах)
+
+Час для повідомлень:
+ З 08:00 до 22:00
+ Уночі — лише термінові аварії!
+
+Адміністрація чату:
+ Адміни можуть видаляти порушення.
+ За систематичні — обмеження або видалення.
+ Питання — у приват адміну.
+
+Вступ до чату = згода з правилами.
+Усі важливі рішення приймаються на зборах або шляхом голосування.
+
+Будьмо ввічливими та активними — разом зробимо наш дім комфортним!`;
+
+      await sendMessage(chatId, rulesText, {
+        inline_keyboard: [[{ text: "ПОГОДЖУЮСЬ", callback_data: "rules_accept" }]]
+      });
+      await env.Teligy3V.put(`state:${userId}`, JSON.stringify({ step: "awaiting_rules_accept" }));
+      return new Response("OK");
+    }
+
+    if (update.callback_query?.data === "rules_accept") {
+      await sendMessage(chatId, "Дякуємо! Тепер введіть номер квартири.");
       await env.Teligy3V.put(`state:${userId}`, JSON.stringify({ step: "awaiting_apartment" }));
       return new Response("OK");
     }
@@ -116,7 +161,6 @@ export default {
   },
 };
 
-// Функція для видалення користувачів, які не завершили реєстрацію
 async function removeInactiveUsers(env) {
   const cutoff = Date.now() - 3600 * 1000; // 1 година назад
   const list = await env.Teligy3V.list({ prefix: "state:" });
@@ -127,8 +171,11 @@ async function removeInactiveUsers(env) {
     if (!stateRaw || !lastActiveStr) continue;
     const state = JSON.parse(stateRaw);
     const lastActive = Number(lastActiveStr);
-    if (lastActive < cutoff && state.step !== "awaiting_code" && state.step !== "registered") {
-      // Видаляємо учасника з групи
+    if (
+      lastActive < cutoff &&
+      state.step !== "awaiting_code" &&
+      state.step !== "registered"
+    ) {
       await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/banChatMember`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -137,7 +184,6 @@ async function removeInactiveUsers(env) {
           user_id: Number(userId),
         }),
       });
-      // Чистимо KV
       await env.Teligy3V.delete(`state:${userId}`);
       await env.Teligy3V.delete(`code:${userId}`);
       await env.Teligy3V.delete(`last_active:${userId}`);
