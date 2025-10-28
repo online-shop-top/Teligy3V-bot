@@ -29,16 +29,22 @@ export default {
     if (!userId) return new Response("OK");
     const chatId = update.message?.chat?.id || update.callback_query?.from?.id;
 
-    // Оновлюємо час останньої активності
+    // Оновлюємо час останньої активності при кожній взаємодії
     await env.Teligy3V.put(`last_active:${userId}`, Date.now().toString());
 
     let userStateRaw = await env.Teligy3V.get(`state:${userId}`);
     let userState = null;
-    try { userState = userStateRaw ? JSON.parse(userStateRaw) : null; } catch { userState = null; }
+    try {
+      userState = userStateRaw ? JSON.parse(userStateRaw) : null;
+    } catch {
+      userState = null;
+    }
 
+    // Старт, вітаємо користувача та пропонуємо кнопку "ПРИЄДНАТИСЬ"
     if (update.message?.text === "/start") {
       const firstName = update.message.from.first_name || "користувач";
-      await sendMessage(chatId,
+      await sendMessage(
+        chatId,
         `👋 Привіт, ${firstName}!\nНатисни кнопку нижче, щоб подати заявку на приєднання до групи.`,
         { inline_keyboard: [[{ text: "ПРИЄДНАТИСЬ", callback_data: "join_request" }]] }
       );
@@ -46,11 +52,10 @@ export default {
       return new Response("OK");
     }
 
+    // Після натискання "ПРИЄДНАТИСЬ" показуємо правила і кнопку "ПОГОДЖУЮСЬ"
     if (update.callback_query?.data === "join_request") {
-      // Правила чату з кнопкою ПОГОДЖУЮСЬ
-      const rulesText = `
-Мета чату:
- Комунікація, опитування, приймання рішень по будинку, оперативне інформування про важливі події, аварії тощо.
+      const rulesText = `Мета чату:
+Комунікація, опитування, приймання рішень по будинку, оперативне інформування про важливі події, аварії тощо.
  Не для політики, реклами чи особистих суперечок.
 
 Поважай сусідів
@@ -75,24 +80,27 @@ export default {
 Будьмо ввічливими та активними — разом зробимо наш будинок комфортним!`;
 
       await sendMessage(chatId, rulesText, {
-        inline_keyboard: [[{ text: "ПОГОДЖУЮСЬ", callback_data: "rules_accept" }]]
+        inline_keyboard: [[{ text: "ПОГОДЖУЮСЬ", callback_data: "rules_accept" }]],
       });
       await env.Teligy3V.put(`state:${userId}`, JSON.stringify({ step: "awaiting_rules_accept" }));
+
       return new Response("OK");
     }
 
+    // Після натискання "ПОГОДЖУЮСЬ" переходимо до запиту номера квартири
     if (update.callback_query?.data === "rules_accept") {
       await sendMessage(chatId, "Дякуємо! Тепер введіть номер квартири.");
       await env.Teligy3V.put(`state:${userId}`, JSON.stringify({ step: "awaiting_apartment" }));
       return new Response("OK");
     }
 
+    // Обробка введення номера квартири
     if (userState?.step === "awaiting_apartment" && update.message?.text) {
       const aptNum = parseInt(update.message.text.trim(), 10);
       if (Number.isNaN(aptNum) || aptNum < 1 || aptNum > 120) {
         await sendMessage(chatId, "Такого номеру квартири не існує. Спробуйте ще раз.");
       } else {
-        let registered = await env.Teligy3V.get(`apt:${aptNum}`, { type: "json" }) || [];
+        let registered = (await env.Teligy3V.get(`apt:${aptNum}`, { type: "json" })) || [];
         if (registered.length >= 2) {
           await sendMessage(chatId, "На цю квартиру вже зареєстровано максимальну кількість осіб. Зверніться до адміністратора.");
           await env.Teligy3V.delete(`state:${userId}`);
@@ -104,9 +112,10 @@ export default {
       return new Response("OK");
     }
 
+    // Обробка введення імені та телефону
     if (userState?.step === "awaiting_details" && update.message?.text) {
       const text = update.message.text.trim();
-      const parts = text.split(",").map(s => s.trim());
+      const parts = text.split(",").map((s) => s.trim());
       if (parts.length < 2 || !parts[0] || !parts[1]) {
         await sendMessage(chatId, "Будь ласка, введіть ім'я і телефон через кому. Наприклад: Іван, 0681234567");
         return new Response("OK");
@@ -114,16 +123,20 @@ export default {
       const [name, phone] = parts;
       const aptNum = userState.apartment;
 
-      let registered = await env.Teligy3V.get(`apt:${aptNum}`, { type: "json" }) || [];
-      registered.push({ userId, name, phone });
-      await env.Teligy3V.put(`apt:${aptNum}`, JSON.stringify(registered));
+      let registered = (await env.Teligy3V.get(`apt:${aptNum}`, { type: "json" })) || [];
+      // Перевіряємо, щоб випадково не додати користувача двічі
+      if (!registered.find((u) => u.userId === userId)) {
+        registered.push({ userId, name, phone });
+        await env.Teligy3V.put(`apt:${aptNum}`, JSON.stringify(registered));
+      }
 
       const code = Math.floor(1000 + Math.random() * 9000).toString();
       await env.Teligy3V.put(`code:${userId}`, code);
       await env.Teligy3V.put(`state:${userId}`, JSON.stringify({ step: "awaiting_code" }));
 
       if (env.ADMIN_CHAT_ID) {
-        await sendMessage(env.ADMIN_CHAT_ID,
+        await sendMessage(
+          env.ADMIN_CHAT_ID,
           `Новий учасник:\nКвартира: ${aptNum}\nІм’я: ${name}\nТелефон: ${phone}\nКод підтвердження: ${code}`
         );
       }
@@ -132,12 +145,16 @@ export default {
       return new Response("OK");
     }
 
+    // Обробка введення коду підтвердження
     if (userState?.step === "awaiting_code" && update.message?.text) {
       const inputCode = update.message.text.trim();
       const savedCode = await env.Teligy3V.get(`code:${userId}`);
 
       if (inputCode === savedCode) {
-        await sendMessage(chatId, `Код вірний! Ось посилання для приєднання до групи:\nhttps://t.me/+6_OJtJfRHSZjZjQy`);
+        await sendMessage(
+          chatId,
+          `Код вірний! Ось посилання для приєднання до групи:\nhttps://t.me/+6_OJtJfRHSZjZjQy`
+        );
         await env.Teligy3V.delete(`state:${userId}`);
         await env.Teligy3V.delete(`code:${userId}`);
       } else {
@@ -146,25 +163,29 @@ export default {
       return new Response("OK");
     }
 
+    // Якщо запит не відповідає жодній логіці, повертаємо ОК
     return new Response("OK");
   },
 };
 
+// Функція для видалення неактивних користувачів (крок 5)
 async function removeInactiveUsers(env) {
-  const cutoff = Date.now() - 3600 * 1000; // 1 година назад
+  const cutoff = Date.now() - 3600 * 1000; // Часовий поріг 1 година
   const list = await env.Teligy3V.list({ prefix: "state:" });
   for (const key of list.keys) {
     const userId = key.name.split(":")[1];
     const stateRaw = await env.Teligy3V.get(key.name);
     const lastActiveStr = await env.Teligy3V.get(`last_active:${userId}`);
     if (!stateRaw || !lastActiveStr) continue;
-    const state = JSON.parse(stateRaw);
+    let state;
+    try {
+      state = JSON.parse(stateRaw);
+    } catch {
+      continue;
+    }
     const lastActive = Number(lastActiveStr);
-    if (
-      lastActive < cutoff &&
-      state.step !== "awaiting_code" &&
-      state.step !== "registered"
-    ) {
+    if (lastActive < cutoff && state.step !== "awaiting_code" && state.step !== "registered") {
+      // Видалення користувача з групи
       await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/banChatMember`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -173,6 +194,8 @@ async function removeInactiveUsers(env) {
           user_id: Number(userId),
         }),
       });
+
+      // Чистимо KV записи
       await env.Teligy3V.delete(`state:${userId}`);
       await env.Teligy3V.delete(`code:${userId}`);
       await env.Teligy3V.delete(`last_active:${userId}`);
