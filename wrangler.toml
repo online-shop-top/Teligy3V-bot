@@ -6,10 +6,14 @@ account_id = "86e97485017fdd3df450c1d758ce1b36"
 [vars]
 TG_BOT_TOKEN = "${{ secrets.TG_BOT_TOKEN }}"
 ADMIN_CHAT_ID = "${{ secrets.ADMIN_CHAT_ID }}"
+GROUP_CHAT_ID = "${{ secrets.GROUP_CHAT_ID }}"
 
 [[kv_namespaces]]
 binding = "Teligy3V"
 id = "be029e33b2b447e2befdf57751d20343"
+
+[triggers]
+crons = ["*/5 * * * *"]
 
 [observability]
 enabled = false
