@@ -13,7 +13,7 @@ binding = "Teligy3V"
 id = "be029e33b2b447e2befdf57751d20343"
 
 [triggers]
-crons = ["* * * * *"]
+crons = ["* * * * *"]  # Це запускає функцію кожну хвилину
 
 [observability]
 enabled = false
