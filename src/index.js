@@ -1,12 +1,12 @@
-// ==================================================
-// Обробка Telegram Webhook
-// ==================================================
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") {
-      return new Response(null, {
-        headers: { "Access-Control-Allow-Origin": "*" },
-      });
+      return new Response(null, { headers: { "Access-Control-Allow-Origin": "*" } });
+    }
+
+    if (request.headers.get("CF-Worker-Cron") === "true") {
+      await removeInactiveUsers(env);
+      return new Response("Cron job completed");
     }
 
     if (request.method !== "POST") {
@@ -25,122 +25,179 @@ export default {
       });
     }
 
-    const userId =
-      update.message?.from?.id ||
-      update.callback_query?.from?.id ||
-      update.chat_member?.new_chat_member?.user?.id;
+    const userId = update.message?.from?.id || update.callback_query?.from?.id;
     if (!userId) return new Response("OK");
+    const chatId = update.message?.chat?.id || update.callback_query?.from?.id;
 
-    // Обробка нового учасника
-    if (
-      update.chat_member &&
-      update.chat_member.new_chat_member &&
-      update.chat_member.new_chat_member.status === "member"
-    ) {
-      const newUserId = update.chat_member.new_chat_member.user.id;
+    // Оновлюємо час останньої активності при кожній взаємодії
+    await env.Teligy3V.put(`last_active:${userId}`, Date.now().toString());
 
-      // Зберігаємо час приєднання
-      await env.Teligy3V.put(`joined_at:${newUserId}`, Date.now().toString());
-      await env.Teligy3V.put(`state:${newUserId}`, JSON.stringify({ step: "not_registered" }));
+    let userStateRaw = await env.Teligy3V.get(`state:${userId}`);
+    let userState = null;
+    try {
+      userState = userStateRaw ? JSON.parse(userStateRaw) : null;
+    } catch {
+      userState = null;
+    }
 
-      // Обмежуємо права нового користувача
-      await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/restrictChatMember`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: env.GROUP_CHAT_ID,
-          user_id: newUserId,
-          permissions: { can_send_messages: false, can_add_web_page_previews: false },
-        }),
-      });
-
+    // Старт, вітаємо користувача та пропонуємо кнопку "ПРИЄДНАТИСЬ"
+    if (update.message?.text === "/start") {
+      const firstName = update.message.from.first_name || "користувач";
       await sendMessage(
-        newUserId,
-        "Вітаємо! Щоб отримати повний доступ, будь ласка, надайте ваші дані командою /start"
+        chatId,
+        `👋 Привіт, ${firstName}!\nНатисни кнопку нижче, щоб подати заявку на приєднання до групи.`,
+        { inline_keyboard: [[{ text: "ПРИЄДНАТИСЬ", callback_data: "join_request" }]] }
       );
+      await env.Teligy3V.put(`state:${userId}`, JSON.stringify({ step: "awaiting_join" }));
       return new Response("OK");
     }
 
-    // Обробка команди /start
-    if (update.message && update.message.text === "/start") {
-      const stateRaw = await env.Teligy3V.get(`state:${userId}`);
-      let state = stateRaw ? JSON.parse(stateRaw) : { step: "not_registered" };
+    // Після натискання "ПРИЄДНАТИСЬ" показуємо правила і кнопку "ПОГОДЖУЮСЬ"
+    if (update.callback_query?.data === "join_request") {
+      const rulesText = `👥 Мета чату:
+Комунікація, опитування, прийняття рішень, оперативне інформування про важливі події, аварії тощо.
+❗ Не для політики, реклами чи особистих суперечок.
 
-      if (state.step === "not_registered") {
-        await env.Teligy3V.put(`state:${userId}`, JSON.stringify({ step: "awaiting_name" }));
-        await sendMessage(userId, "Будь ласка, надішліть своє ім'я:");
-        return new Response("OK");
-      }
+🤝 Поважай інших учасників чату:
+– Без образ, хамства чи принижень.
+– Критика має бути конструктивною.
+– Особисті суперечки — у приват.
+
+🚫 Заборонено:
+– Політичні, релігійні, воєнні теми.
+– Реклама, спам, продаж товарів/послуг.
+– Поширення неперевіреної інформації.
+– Ненормативна лексика, образливі жарти, токсичність.
+
+🕗 Час для повідомлень: З 08:00 до 22:00.
+🚨 Уночі — лише термінові аварійні повідомлення!
+
+👮 За порушення правил — обмеження або видалення.
+
+✅ Вступ до чату = згода з правилами.
+
+❤️ Будьмо ввічливими, активними та відповідальними — разом зробимо наш будинок комфортним!`;
+
+      await sendMessage(chatId, rulesText, {
+        inline_keyboard: [[{ text: "ПОГОДЖУЮСЬ", callback_data: "rules_accept" }]],
+      });
+      await env.Teligy3V.put(`state:${userId}`, JSON.stringify({ step: "awaiting_rules_accept" }));
+
+      return new Response("OK");
     }
 
-    // Обробка введення імені користувача
-    if (update.message && update.message.text) {
-      const stateRaw = await env.Teligy3V.get(`state:${userId}`);
-      let state = stateRaw ? JSON.parse(stateRaw) : { step: "not_registered" };
-
-      if (state.step === "awaiting_name") {
-        const name = update.message.text.trim();
-        await env.Teligy3V.put(`user_data:${userId}`, JSON.stringify({ name }));
-        await env.Teligy3V.put(`state:${userId}`, JSON.stringify({ step: "registered" }));
-
-        // Надання повних прав користувачу
-        await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/restrictChatMember`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: env.GROUP_CHAT_ID,
-            user_id: userId,
-            permissions: {
-              can_send_messages: true,
-              can_send_media_messages: true,
-              can_add_web_page_previews: true,
-              can_invite_users: true,
-            },
-          }),
-        });
-
-        await sendMessage(userId, `Дякуємо, ${name}! Тепер у вас повний доступ.`);
-        return new Response("OK");
-      }
+    // Після натискання "ПОГОДЖУЮСЬ" переходимо до запиту номера квартири
+    if (update.callback_query?.data === "rules_accept") {
+      await sendMessage(chatId, "Дякуємо! Тепер введіть номер квартири.");
+      await env.Teligy3V.put(`state:${userId}`, JSON.stringify({ step: "awaiting_apartment" }));
+      return new Response("OK");
     }
 
+    // Обробка введення номера квартири
+    if (userState?.step === "awaiting_apartment" && update.message?.text) {
+      const aptNum = parseInt(update.message.text.trim(), 10);
+      if (Number.isNaN(aptNum) || aptNum < 1 || aptNum > 120) {
+        await sendMessage(chatId, "Такого номеру квартири не існує. Спробуйте ще раз.");
+      } else {
+        let registered = (await env.Teligy3V.get(`apt:${aptNum}`, { type: "json" })) || [];
+        if (registered.length >= 2) {
+          await sendMessage(chatId, "На цю квартиру вже зареєстровано максимальну кількість осіб. Зверніться до адміністратора.");
+          await env.Teligy3V.delete(`state:${userId}`);
+        } else {
+          await env.Teligy3V.put(`state:${userId}`, JSON.stringify({ step: "awaiting_details", apartment: aptNum }));
+          await sendMessage(chatId, "Введіть, будь ласка, ваше ім'я та номер телефону через кому, наприклад: Іван, 0681234567");
+        }
+      }
+      return new Response("OK");
+    }
+
+    // Обробка введення імені та телефону
+    if (userState?.step === "awaiting_details" && update.message?.text) {
+      const text = update.message.text.trim();
+      const parts = text.split(",").map((s) => s.trim());
+      if (parts.length < 2 || !parts[0] || !parts[1]) {
+        await sendMessage(chatId, "Будь ласка, введіть ім'я і телефон через кому. Наприклад: Іван, 0681234567");
+        return new Response("OK");
+      }
+      const [name, phone] = parts;
+      const aptNum = userState.apartment;
+
+      let registered = (await env.Teligy3V.get(`apt:${aptNum}`, { type: "json" })) || [];
+      // Перевіряємо, щоб випадково не додати користувача двічі
+      if (!registered.find((u) => u.userId === userId)) {
+        registered.push({ userId, name, phone });
+        await env.Teligy3V.put(`apt:${aptNum}`, JSON.stringify(registered));
+      }
+
+      const code = Math.floor(1000 + Math.random() * 9000).toString();
+      await env.Teligy3V.put(`code:${userId}`, code);
+      await env.Teligy3V.put(`state:${userId}`, JSON.stringify({ step: "awaiting_code" }));
+
+      if (env.ADMIN_CHAT_ID) {
+        await sendMessage(
+          env.ADMIN_CHAT_ID,
+          `Новий учасник:\nКвартира: ${aptNum}\nІм’я: ${name}\nТелефон: ${phone}\nКод підтвердження: ${code}`
+        );
+      }
+
+      await sendMessage(chatId, `Код підтвердження надіслано адміністратору. Будь ласка, введіть код для підтвердження.`);
+      return new Response("OK");
+    }
+
+    // Обробка введення коду підтвердження
+    if (userState?.step === "awaiting_code" && update.message?.text) {
+      const inputCode = update.message.text.trim();
+      const savedCode = await env.Teligy3V.get(`code:${userId}`);
+
+      if (inputCode === savedCode) {
+        await sendMessage(
+          chatId,
+          `Код вірний! Ось посилання для приєднання до групи:\nhttps://t.me/+WnKazcPqqwY4MzZi`
+        );
+        await env.Teligy3V.delete(`state:${userId}`);
+        await env.Teligy3V.delete(`code:${userId}`);
+      } else {
+        await sendMessage(chatId, `Невірний код. Спробуйте ще раз.`);
+      }
+      return new Response("OK");
+    }
+
+    // Якщо запит не відповідає жодній логіці, повертаємо ОК
     return new Response("OK");
   },
 };
 
-// ==================================================
-// Cron: видалення користувачів, що не надали дані
-// ==================================================
-export async function scheduled(event, env, ctx) {
-  const cutoff = Date.now() - 60000; // 1 хвилина
-  const list = await env.Teligy3V.list({ prefix: "joined_at:" });
-
+// Функція для видалення неактивних користувачів (крок 5)
+async function removeInactiveUsers(env) {
+  const cutoff = Date.now() - 604800 * 1000; // Часовий поріг 168 годин
+  const list = await env.Teligy3V.list({ prefix: "state:" });
   for (const key of list.keys) {
     const userId = key.name.split(":")[1];
-    const joinedAtStr = await env.Teligy3V.get(`joined_at:${userId}`);
-    const stateRaw = await env.Teligy3V.get(`state:${userId}`);
-
-    if (!joinedAtStr || !stateRaw) continue;
-    const joinedAt = Number(joinedAtStr);
-
+    const stateRaw = await env.Teligy3V.get(key.name);
+    const lastActiveStr = await env.Teligy3V.get(`last_active:${userId}`);
+    if (!stateRaw || !lastActiveStr) continue;
     let state;
     try {
       state = JSON.parse(stateRaw);
     } catch {
       continue;
     }
-
-    if (joinedAt < cutoff && state.step !== "registered") {
-      // Видаляємо користувача з групи
+    const lastActive = Number(lastActiveStr);
+    if (lastActive < cutoff && state.step !== "awaiting_code" && state.step !== "registered") {
+      // Видалення користувача з групи
       await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/banChatMember`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: env.GROUP_CHAT_ID, user_id: Number(userId) }),
+        body: JSON.stringify({
+          chat_id: env.GROUP_CHAT_ID,
+          user_id: Number(userId),
+        }),
       });
 
-      await env.Teligy3V.delete(`joined_at:${userId}`);
+      // Чистимо KV записи
       await env.Teligy3V.delete(`state:${userId}`);
-      await env.Teligy3V.delete(`user_data:${userId}`);
+      await env.Teligy3V.delete(`code:${userId}`);
+      await env.Teligy3V.delete(`last_active:${userId}`);
     }
   }
 }
