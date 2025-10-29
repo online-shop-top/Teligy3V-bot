@@ -2,6 +2,7 @@ name = "teligy3v-bot"
 main = "src/index.js"
 compatibility_date = "2025-10-16"
 account_id = "86e97485017fdd3df450c1d758ce1b36"
+type = "javascript"
 
 [vars]
 TG_BOT_TOKEN = "${{ secrets.TG_BOT_TOKEN }}"
@@ -13,7 +14,7 @@ binding = "Teligy3V"
 id = "be029e33b2b447e2befdf57751d20343"
 
 [triggers]
-crons = ["* * * * *"] # Запускати кожну хвилину
+crons = ["* * * * *"]
 
 [observability]
 enabled = false
