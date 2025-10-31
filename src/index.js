@@ -83,7 +83,6 @@ export default {
           userId,
           `👥 Мета чату:
 Комунікація, опитування, прийняття рішень, оперативне інформування про важливі події, аварії тощо.
-❗ Не для політики, реклами чи особистих суперечок.
 
 🤝 Поважай інших учасників чату:
 – Без образ, хамства чи принижень.
@@ -142,7 +141,7 @@ export default {
           JSON.stringify({ step: "awaiting_details", apartment: aptNum })
         );
 
-        await sendMessage(userId, "Введіть ім'я та телефон через кому:");
+        await sendMessage(userId, "Введіть ім'я та телефон через кому. Наприклад: Іван, 0681234567");
         return new Response("OK");
       }
 
@@ -161,12 +160,12 @@ export default {
         registered.push({ userId, name, phone });
         await env.Teligy3V.put(`apt:${aptNum}`, JSON.stringify(registered));
 
-        const code = Math.floor(100000 + Math.random() * 900000).toString();
+        const code = Math.floor(1000 + Math.random() * 9000).toString();
         await env.Teligy3V.put(`code:${userId}`, code);
         await env.Teligy3V.put(`state:${userId}`, JSON.stringify({ step: "awaiting_code", apartment: aptNum }));
 
-        await sendMessage(env.ADMIN_CHAT_ID, `🏠 Квартира ${aptNum}\n👤 ${name}\n📱 ${phone}\n🔑 Код: ${code}`);
-        await sendMessage(userId, "✅ Код надіслано адміністратору.");
+        await sendMessage(env.ADMIN_CHAT_ID, `Новий учасник:\nКвартира: ${aptNum}\nІм’я: ${name}\nТелефон: ${phone}\nКод підтвердження: ${code}`);
+        await sendMessage(userId, "✅ Код підтвердження надіслано адміністратору. Будь ласка, введіть код для підтвердження.");
         return new Response("OK");
       }
 
@@ -176,7 +175,7 @@ export default {
         const aptNum = userState.apartment;
 
         if (update.message.text.trim() !== savedCode) {
-          await sendMessage(userId, "❌ Невірний код. Ще раз:");
+          await sendMessage(userId, "❌ Невірний код. Спробуйте ще раз.");
           return new Response("OK");
         }
 
@@ -189,7 +188,7 @@ export default {
         const invite = await resp.json();
         const link = invite.result.invite_link;
 
-        await sendMessage(userId, `✅ Код підтверджено!\nОсь ваше посилання:\n${link}`);
+        await sendMessage(userId, `✅ Код вірний! Ось посилання для приєднання до групи:\n${link}`);
 
         await env.Teligy3V.put(`state:${userId}`, JSON.stringify({ step: "registered" }));
         await env.Teligy3V.delete(`code:${userId}`);
