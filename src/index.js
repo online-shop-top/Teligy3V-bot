@@ -43,26 +43,51 @@ export default {
 
     if (!userId) return new Response("OK");
 
-    // ✅ Відправляємо відповіді лише в приват
+    // ✅ Приватний /start
     if (update.message?.chat?.type !== "private" && update.message?.text === "/start") {
       return new Response("OK");
     }
 
     const recipientId = userId;
 
-    // ✅ Новий учасник приєднався
+    // ✅ Новий учасник
     if (
-      update.chat_member &&
-      update.chat_member.new_chat_member &&
-      update.chat_member.new_chat_member.status === "member"
+      update.chat_member?.new_chat_member?.status === "member"
     ) {
-      const newUserId = update.chat_member.new_chat_member.user.id;
-      await env.Teligy3V.put(`joined_at:${newUserId}`, Date.now().toString());
-      await env.Teligy3V.put(`state:${newUserId}`, JSON.stringify({ step: "not_registered" }));
+      await env.Teligy3V.put(`joined_at:${userId}`, Date.now().toString());
+      await env.Teligy3V.put(`state:${userId}`, JSON.stringify({ step: "not_registered" }));
       return new Response("OK");
     }
 
-    // ✅ Оновлюємо активність
+    // ✅ Користувач вийшов / кікнутий
+    if (
+      update.chat_member &&
+      ["left", "kicked"].includes(update.chat_member.new_chat_member?.status)
+    ) {
+      const removedUserId = update.chat_member.new_chat_member.user.id;
+
+      await env.Teligy3V.delete(`state:${removedUserId}`);
+      await env.Teligy3V.delete(`joined_at:${removedUserId}`);
+      await env.Teligy3V.delete(`code:${removedUserId}`);
+      await env.Teligy3V.delete(`last_active:${removedUserId}`);
+
+      const aptList = await env.Teligy3V.list({ prefix: "apt:" });
+
+      for (const apt of aptList.keys) {
+        let residents = (await env.Teligy3V.get(apt.name, { type: "json" })) || [];
+        const filtered = residents.filter(u => u.userId !== removedUserId);
+
+        if (filtered.length === 0) {
+          await env.Teligy3V.delete(apt.name);
+        } else {
+          await env.Teligy3V.put(apt.name, JSON.stringify(filtered));
+        }
+      }
+
+      return new Response("OK");
+    }
+
+    // ✅ Оновлення активності
     await env.Teligy3V.put(`last_active:${userId}`, Date.now().toString());
 
     let userStateRaw = await env.Teligy3V.get(`state:${userId}`);
@@ -98,7 +123,7 @@ export default {
       return new Response("OK");
     }
 
-    // ✅ Прийняття правил
+    // ✅ Погодження правил
     if (update.callback_query?.data === "rules_accept") {
       await answerCallback(update.callback_query.id);
       await sendMessage(recipientId, "Введіть номер квартири:");
@@ -167,7 +192,6 @@ export default {
         return new Response("OK");
       }
 
-      // ✅ Генеруємо одноразове інвайт-посилання
       const resp = await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/createChatInviteLink`, {
         method: "POST",
         headers: {"Content-Type": "application/json"},
@@ -194,17 +218,17 @@ export default {
   },
 };
 
-// ✅ Видалення неактивних
+// ✅ Авто-видалення неактивних
 async function removeInactiveUsers(env) {
-  const cutoff = Date.now() - 30 * 60 * 1000; // 30 хв
+  const cutoff = Date.now() - 30 * 60 * 1000; // 30 хвилин
 
   const list = await env.Teligy3V.list({ prefix: "joined_at:" });
+  const aptList = await env.Teligy3V.list({ prefix: "apt:" });
 
   for (const key of list.keys) {
     const userId = key.name.split(":")[1];
     const joinedAtStr = await env.Teligy3V.get(`joined_at:${userId}`);
     const stateRaw = await env.Teligy3V.get(`state:${userId}`);
-    const aptList = await env.Teligy3V.list({ prefix: "apt:" });
 
     if (!joinedAtStr || !stateRaw) continue;
 
@@ -226,9 +250,7 @@ async function removeInactiveUsers(env) {
       await env.Teligy3V.delete(`code:${userId}`);
       await env.Teligy3V.delete(`last_active:${userId}`);
 
-      // 🔥 Очищаємо квартиру, якщо були внесені дані
       for (const apt of aptList.keys) {
-        const aptNum = apt.name.split(":")[1];
         let residents = (await env.Teligy3V.get(apt.name, { type: "json" })) || [];
         const filtered = residents.filter(u => u.userId !== userId);
 
