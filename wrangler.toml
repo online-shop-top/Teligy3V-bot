@@ -13,14 +13,23 @@ binding = "Teligy3V"
 id = "be029e33b2b447e2befdf57751d20343"
 
 [triggers]
-crons = ["*/30 * * * *"]  # Запуск кожні 30 хвилин для видалення тих хто не пройшов реєстрацію
+crons = ["*/30 * * * *"]  # Запуск кожні 30 хвилин для видалення тих, хто не пройшов реєстрацію
 
 [observability]
-enabled = false
+enabled = false  # Вимкнено для економії ресурсів
 head_sampling_rate = 1
 
 [observability.logs]
-enabled = true
+enabled = true  # Залишити логування
 head_sampling_rate = 1
 persist = true
 invocation_logs = true
+
+[build]
+# Опціонально додайте налаштування для інтеграції з вашою збіркою (наприклад, Babel, Webpack або TypeScript)
+# Наприклад:
+# command = "npm run build"
+# cwd = "./src"
+# upload = { format = "modules" }
+
+# Ви можете використовувати "modules" або інші типи пакувань для вашого проекту, залежно від вашої структури
