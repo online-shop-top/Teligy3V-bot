@@ -18,14 +18,19 @@ id = "7598b981-00a8-405b-b4d8-91aff9b877b2"
 crons = ["0 0 * * *"]  # Запуск кожні 24 години для видалення тих, хто не пройшов реєстрацію
 
 [observability]
-enabled = false  # Вимкнено для економії ресурсів
+enabled = false
 head_sampling_rate = 1
 
 [observability.logs]
-enabled = true  # Залишити логування
+enabled = true
 head_sampling_rate = 1
 persist = true
 invocation_logs = true
+
+[observability.traces]
+enabled = true
+persist = true
+head_sampling_rate = 1
 
 [build]
 # Опціонально додайте налаштування для інтеграції з вашою збіркою (наприклад, Babel, Webpack або TypeScript)
