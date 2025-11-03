@@ -1,5 +1,36 @@
-- name: Set up Wrangler
-  uses: cloudflare/wrangler-action@v3
-  with:
-    version: "4.45.3" # Остання стабільна версія wrangler
-    apiToken: ${{ secrets.CF_API_TOKEN }}
+name = "teligy3v-bot"
+main = "src/index.js"  # Вказуємо точку входу для твого worker
+compatibility_date = "2025-11-03"
+account_id = "86e97485017fdd3df450c1d758ce1b36"  # Твій Cloudflare account ID
+
+# Перемінні середовища
+[vars]
+TG_BOT_TOKEN = "${{ secrets.TG_BOT_TOKEN }}"  # Токен Telegram бота
+ADMIN_CHAT_ID = "${{ secrets.ADMIN_CHAT_ID }}"  # ID чату адміністратора
+GROUP_CHAT_ID = "${{ secrets.GROUP_CHAT_ID }}"  # ID групи Telegram
+
+# Налаштування бази даних D1
+[[d1_databases]]
+binding = "my_database"  # Зв'язок з базою даних у worker
+database_name = "my_database"
+id = "7598b981-00a8-405b-b4d8-91aff9b877b2"  # ID твоєї бази даних D1
+
+# Планувальник для запуску крон-роботів (видалення неактивних користувачів)
+[triggers]
+crons = ["0 0 * * *"]  # Запуск кожні 24 години
+
+# Налаштування спостереження за роботою worker
+[observability]
+enabled = false
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
+
+[observability.traces]
+enabled = true
+persist = true
+head_sampling_rate = 1
