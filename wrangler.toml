@@ -9,6 +9,9 @@ TG_BOT_TOKEN = "${{ secrets.TG_BOT_TOKEN }}"  # Токен Telegram бота
 ADMIN_CHAT_ID = "${{ secrets.ADMIN_CHAT_ID }}"  # ID чату адміністратора
 GROUP_CHAT_ID = "${{ secrets.GROUP_CHAT_ID }}"  # ID групи Telegram
 
+# Указуємо, що використовуємо ES модулі
+type = "module"
+
 # Налаштування бази даних D1
 [[d1_databases]]
 binding = "my_database"
