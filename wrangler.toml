@@ -1,6 +1,6 @@
 name = "teligy3v-bot"
 main = "src/index.js"
-compatibility_date = "2025-11-03"
+compatibility_date = "2025-10-16"
 account_id = "86e97485017fdd3df450c1d758ce1b36"
 
 [vars]
@@ -14,28 +14,8 @@ database_name = "my_database"
 id = "7598b981-00a8-405b-b4d8-91aff9b877b2"
 
 [triggers]
-crons = ["0 0 * * *"]  # Запуск кожні 24 години для видалення тих, хто не пройшов реєстрацію
+crons = ["0 0 * * *"]
 
 [observability]
 enabled = false
 head_sampling_rate = 1
-
-[observability.logs]
-enabled = true
-head_sampling_rate = 1
-persist = true
-invocation_logs = true
-
-[observability.traces]
-enabled = true
-persist = true
-head_sampling_rate = 1
-
-[build]
-# Опціонально додайте налаштування для інтеграції з вашою збіркою (наприклад, Babel, Webpack або TypeScript)
-# Наприклад:
-# command = "npm run build"
-# cwd = "./src"
-# upload = { format = "modules" }
-
-# Ви можете використовувати "modules" або інші типи пакувань для вашого проекту, залежно від вашої структури
