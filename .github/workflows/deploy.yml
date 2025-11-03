@@ -9,17 +9,23 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      # Крок 1: Витягнути репозиторій
       - name: Checkout code
         uses: actions/checkout@v2
 
+      # Крок 2: Встановити Node.js
       - name: Set up Node.js
         uses: actions/setup-node@v2
         with:
-          node-version: '20.x'  # Оновлено на версію 20.x, якщо вона у вас використовується
+          node-version: '20.x'
 
+      # Крок 3: Встановити залежності вручну
       - name: Install dependencies
-        run: npm install
+        run: |
+          npm install -g wrangler@3.90.0  # Встановити Wrangler глобально
+          npm install  # Встановити решту залежностей
 
+      # Крок 4: Запустити деплой
       - name: Deploy to Cloudflare Workers
         uses: cloudflare/wrangler-action@v3
         with:
