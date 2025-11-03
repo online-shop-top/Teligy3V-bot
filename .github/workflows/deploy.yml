@@ -17,18 +17,15 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v2
         with:
-          node-version: '20.x'
+          node-version: '20.x'  # Використовуємо Node.js 20.x
 
-      # Крок 3: Встановити залежності вручну
-      - name: Install dependencies
-        run: |
-          npm install -g wrangler@3.90.0  # Встановити Wrangler глобально
-          npm install  # Встановити решту залежностей
+      # Крок 3: Встановити Wrangler глобально
+      - name: Install Wrangler globally
+        run: npm install -g wrangler@3.90.0
 
-      # Крок 4: Запустити деплой
+      # Крок 4: Запустити деплой через wrangler
       - name: Deploy to Cloudflare Workers
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CF_API_TOKEN }}
+        run: wrangler deploy  # Використовуємо wrangler для деплою
         env:
-          WRANGLER_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}  # API токен Cloudflare з секретів GitHub
+          WRANGLER_API_TOKEN: ${{ secrets.CF_API_TOKEN }}  # API токен Cloudflare для wrangler
