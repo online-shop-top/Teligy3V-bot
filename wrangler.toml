@@ -1,21 +1,5 @@
-name = "teligy3v-bot"
-main = "src/index.js"
-compatibility_date = "2025-10-16"
-account_id = "86e97485017fdd3df450c1d758ce1b36"
-
-[vars]
-TG_BOT_TOKEN = "${{ secrets.TG_BOT_TOKEN }}"
-ADMIN_CHAT_ID = "${{ secrets.ADMIN_CHAT_ID }}"
-GROUP_CHAT_ID = "${{ secrets.GROUP_CHAT_ID }}"
-
-[[d1_databases]]
-binding = "my_database"
-database_name = "my_database"
-id = "7598b981-00a8-405b-b4d8-91aff9b877b2"
-
-[triggers]
-crons = ["0 0 * * *"]
-
-[observability]
-enabled = false
-head_sampling_rate = 1
+- name: Set up Wrangler
+  uses: cloudflare/wrangler-action@v3
+  with:
+    version: "4.45.3" # Остання стабільна версія wrangler
+    apiToken: ${{ secrets.CF_API_TOKEN }}
