@@ -211,7 +211,7 @@ export default {
 
 // ✅ Авто-видалення неактивних
 async function removeInactiveUsers(env) {
-  const cutoff = Date.now() - 30 * 60 * 1000; // 30 хвилин
+  const cutoff = Date.now() - 60 * 60 * 24 * 1000; // 24 години
 
   const list = await env.Teligy3V.list({ prefix: "joined_at:" });
   const aptList = await env.Teligy3V.list({ prefix: "apt:" });
