@@ -13,13 +13,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '20.x'
+      # Якщо не потрібен npm для встановлення залежностей, цей крок можна прибрати
+      # - name: Set up Node.js
+      #   uses: actions/setup-node@v3
+      #   with:
+      #     node-version: '20.x'
 
-      - name: Install dependencies
-        run: npm install
+      # Встановлення залежностей npm, якщо вони є (якщо потрібен пакет package.json)
+      # - name: Install dependencies
+      #   run: npm install
 
       - name: Authenticate with Cloudflare
         uses: cloudflare/wrangler-action@v3
