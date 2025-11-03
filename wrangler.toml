@@ -11,9 +11,8 @@ GROUP_CHAT_ID = "${{ secrets.GROUP_CHAT_ID }}"  # ID групи Telegram
 
 # Налаштування бази даних D1
 [[d1_databases]]
-binding = "my_database"  # Зв'язок з базою даних у worker
-database_name = "my_database"
-id = "7598b981-00a8-405b-b4d8-91aff9b877b2"  # ID твоєї бази даних D1
+binding = "my_database"
+database_id = "7598b981-00a8-405b-b4d8-91aff9b877b2"  # Замінили "id" на "database_id"
 
 # Планувальник для запуску крон-роботів (видалення неактивних користувачів)
 [triggers]
