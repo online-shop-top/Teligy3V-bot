@@ -1,34 +1,30 @@
 name: Deploy Worker
+
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Завантаження коду
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v2
 
-      # 2️⃣ Встановлення Node.js
-      - name: Setup Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: 20
+          node-version: '20.x'
 
-      # 3️⃣ Встановлення залежностей (якщо є package.json)
-      - name: Install dependencies (optional)
-        run: |
-          if [ -f "package.json" ]; then
-            npm install
-          fi
+      - name: Install dependencies
+        run: npm install
 
-      # 4️⃣ Деплой через Wrangler
-      - name: Deploy to Cloudflare
+      - name: Authenticate with Cloudflare
         uses: cloudflare/wrangler-action@v3
         with:
-          apiToken: ${{ secrets.CF_API_TOKEN }}
-          accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          command: publish
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Deploy to Cloudflare
+        run: wrangler deploy
