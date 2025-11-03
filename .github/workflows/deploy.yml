@@ -23,7 +23,11 @@ jobs:
       - name: Install Wrangler globally
         run: npm install -g wrangler@3.90.0
 
-      # Крок 4: Запустити деплой через wrangler
+      # Крок 4: Перевірити, чи файл wrangler.toml існує в корені проекту
+      - name: Check if wrangler.toml exists
+        run: ls -l
+
+      # Крок 5: Запустити деплой через wrangler
       - name: Deploy to Cloudflare Workers
         run: wrangler deploy  # Використовуємо wrangler для деплою
         env:
