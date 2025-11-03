@@ -8,12 +8,13 @@ TG_BOT_TOKEN = "${{ secrets.TG_BOT_TOKEN }}"
 ADMIN_CHAT_ID = "${{ secrets.ADMIN_CHAT_ID }}"
 GROUP_CHAT_ID = "${{ secrets.GROUP_CHAT_ID }}"
 
-[[kv_namespaces]]
-binding = "Teligy3V"
-id = "be029e33b2b447e2befdf57751d20343"
+[[d1_databases]]
+binding = "my_database"
+database_name = "my_database"
+id = "7598b981-00a8-405b-b4d8-91aff9b877b2"
 
 [triggers]
-crons = ["0 0 * * *"]  # Запуск кожні 30 хвилин для видалення тих, хто не пройшов реєстрацію
+crons = ["0 0 * * *"]  # Запуск кожні 24 години для видалення тих, хто не пройшов реєстрацію
 
 [observability]
 enabled = false  # Вимкнено для економії ресурсів
