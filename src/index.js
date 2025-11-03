@@ -1,6 +1,29 @@
 export default {
   async fetch(request, env) {
     try {
+      const db = env.my_database; // Підключення до D1
+
+      // Крок 1: Створення таблиць, якщо вони не існують
+      await db.prepare(`
+        CREATE TABLE IF NOT EXISTS users (
+          id TEXT PRIMARY KEY, -- Унікальний ID користувача
+          first_name TEXT,
+          last_name TEXT,
+          phone TEXT,
+          apartment INTEGER,
+          status TEXT, -- Статус користувача
+          joined_at INTEGER -- Час приєднання
+        );
+      `).run();
+
+      await db.prepare(`
+        CREATE TABLE IF NOT EXISTS confirmation_codes (
+          user_id TEXT PRIMARY KEY, -- Зв'язок з користувачем
+          code TEXT,
+          created_at INTEGER -- Час створення коду
+        );
+      `).run();
+
       if (request.method === "OPTIONS") {
         return new Response(null, {
           headers: { "Access-Control-Allow-Origin": "*" },
@@ -8,7 +31,7 @@ export default {
       }
 
       if (request.headers.get("CF-Worker-Cron") === "true") {
-        await removeInactiveUsers(env);
+        await removeInactiveUsers(db, env);
         return new Response("Cron job completed");
       }
 
@@ -46,23 +69,24 @@ export default {
         return new Response("Invalid user data", { status: 400 });
       }
 
-      // ✅ Новий учасник
+      // Крок 2: Створення нового користувача
       if (update.chat_member?.new_chat_member?.status === "member") {
-        await env.Teligy3V.put(`joined_at:${userId}`, Date.now().toString());
-        await env.Teligy3V.put(`state:${userId}`, JSON.stringify({ step: "not_registered" }));
+        await db.prepare("INSERT OR REPLACE INTO users (id, status, joined_at) VALUES (?, ?, ?)")
+          .bind(userId, "not_registered", Date.now())
+          .run();
         return new Response("OK");
       }
 
-      // ✅ Оновлення активності
-      await env.Teligy3V.put(`last_active:${userId}`, Date.now().toString());
+      // Крок 3: Оновлення активності користувача
+      await db.prepare("UPDATE users SET joined_at = ? WHERE id = ?")
+        .bind(Date.now(), userId)
+        .run();
 
-      let userStateRaw = await env.Teligy3V.get(`state:${userId}`);
-      let userState = null;
-      try {
-        userState = userStateRaw ? JSON.parse(userStateRaw) : null;
-      } catch {}
+      const userState = await db.prepare("SELECT * FROM users WHERE id = ?")
+        .bind(userId)
+        .first();
 
-      // ✅ /start
+      // Крок 4: Обробка команд
       if (update.message?.text === "/start") {
         const firstName = update.message.from.first_name || "користувач";
 
@@ -72,11 +96,13 @@ export default {
           { inline_keyboard: [[{ text: "ПРИЄДНАТИСЬ ✅", callback_data: "join_request" }]] }
         );
 
-        await env.Teligy3V.put(`state:${userId}`, JSON.stringify({ step: "awaiting_join" }));
+        await db.prepare("UPDATE users SET status = ? WHERE id = ?")
+          .bind("awaiting_join", userId)
+          .run();
         return new Response("OK");
       }
 
-      // ✅ Натискання "ПРИЄДНАТИСЬ"
+      // Натискання "ПРИЄДНАТИСЬ"
       if (update.callback_query?.data === "join_request") {
         await answerCallback(update.callback_query.id);
         await sendMessage(
@@ -103,23 +129,27 @@ export default {
 ✅ Вступ до чату = згода з правилами.
 
 ❤️ Будьмо ввічливими, активними та відповідальними — разом зробимо наш будинок комфортним!`,
-          { inline_keyboard: [[{ text: "ПОГОДЖУЮСЬ ✅", callback_data: "rules_accept" }]] }
+          { inline_keyboard: [[{ text: "ПОГОДЖУСЬ ✅", callback_data: "rules_accept" }]] }
         );
 
-        await env.Teligy3V.put(`state:${userId}`, JSON.stringify({ step: "awaiting_rules_accept" }));
+        await db.prepare("UPDATE users SET status = ? WHERE id = ?")
+          .bind("awaiting_rules_accept", userId)
+          .run();
         return new Response("OK");
       }
 
-      // ✅ Погодження правил
+      // Погодження правил
       if (update.callback_query?.data === "rules_accept") {
         await answerCallback(update.callback_query.id);
         await sendMessage(userId, "Введіть номер квартири:");
-        await env.Teligy3V.put(`state:${userId}`, JSON.stringify({ step: "awaiting_apartment" }));
+        await db.prepare("UPDATE users SET status = ? WHERE id = ?")
+          .bind("awaiting_apartment", userId)
+          .run();
         return new Response("OK");
       }
 
-      // ✅ Введення номера квартири
-      if (userState?.step === "awaiting_apartment" && update.message?.text) {
+      // Введення номера квартири
+      if (userState.status === "awaiting_apartment" && update.message?.text) {
         const aptNum = parseInt(update.message.text.trim(), 10);
 
         if (isNaN(aptNum) || aptNum < 1 || aptNum > 120) {
@@ -127,26 +157,29 @@ export default {
           return new Response("OK");
         }
 
-        let registered = (await env.Teligy3V.get(`apt:${aptNum}`, { type: "json" })) || [];
+        let registered = await db.prepare("SELECT * FROM users WHERE apartment = ?")
+          .bind(aptNum)
+          .all();
 
         if (registered.length >= 2) {
           await sendMessage(userId, "❌ На цю квартиру вже зареєстровано 2 мешканці.");
-          await env.Teligy3V.delete(`state:${userId}`);
-          await env.Teligy3V.delete(`joined_at:${userId}`);
           return new Response("OK");
         }
 
-        await env.Teligy3V.put(
-          `state:${userId}`,
-          JSON.stringify({ step: "awaiting_details", apartment: aptNum })
-        );
+        await db.prepare("UPDATE users SET apartment = ? WHERE id = ?")
+          .bind(aptNum, userId)
+          .run();
+
+        await db.prepare("UPDATE users SET status = ? WHERE id = ?")
+          .bind("awaiting_details", userId)
+          .run();
 
         await sendMessage(userId, "Введіть ім'я та телефон через кому. Наприклад: Іван, 0681234567");
         return new Response("OK");
       }
 
-      // ✅ Введення ім'я та телефону
-      if (userState?.step === "awaiting_details" && update.message?.text) {
+      // Введення ім'я та телефону
+      if (userState.status === "awaiting_details" && update.message?.text) {
         const [name, phone] = update.message.text.trim().split(",").map(s => s.trim());
 
         if (!name || !phone) {
@@ -155,26 +188,27 @@ export default {
         }
 
         const aptNum = userState.apartment;
-        let registered = (await env.Teligy3V.get(`apt:${aptNum}`, { type: "json" })) || [];
-
-        registered.push({ userId, name, phone });
-        await env.Teligy3V.put(`apt:${aptNum}`, JSON.stringify(registered));
+        await db.prepare("UPDATE users SET first_name = ?, phone = ? WHERE id = ?")
+          .bind(name, phone, userId)
+          .run();
 
         const code = Math.floor(1000 + Math.random() * 9000).toString();
-        await env.Teligy3V.put(`code:${userId}`, code);
-        await env.Teligy3V.put(`state:${userId}`, JSON.stringify({ step: "awaiting_code", apartment: aptNum }));
+        await db.prepare("INSERT OR REPLACE INTO confirmation_codes (user_id, code, created_at) VALUES (?, ?, ?)")
+          .bind(userId, code, Date.now())
+          .run();
 
         await sendMessage(env.ADMIN_CHAT_ID, `Новий учасник:\nКвартира: ${aptNum}\nІм’я: ${name}\nТелефон: ${phone}\nКод підтвердження: ${code}`);
         await sendMessage(userId, "✅ Код підтвердження надіслано адміністратору. Будь ласка, введіть код для підтвердження.");
         return new Response("OK");
       }
 
-      // ✅ Перевірка коду
-      if (userState?.step === "awaiting_code" && update.message?.text) {
-        const savedCode = await env.Teligy3V.get(`code:${userId}`);
-        const aptNum = userState.apartment;
+      // Перевірка коду
+      if (userState.status === "awaiting_code" && update.message?.text) {
+        const savedCode = await db.prepare("SELECT * FROM confirmation_codes WHERE user_id = ?")
+          .bind(userId)
+          .first();
 
-        if (update.message.text.trim() !== savedCode) {
+        if (update.message.text.trim() !== savedCode.code) {
           await sendMessage(userId, "❌ Невірний код. Спробуйте ще раз.");
           return new Response("OK");
         }
@@ -189,10 +223,12 @@ export default {
         const link = invite.result.invite_link;
 
         await sendMessage(userId, `✅ Код вірний! Ось посилання для приєднання до групи:\n${link}`);
-
-        await env.Teligy3V.put(`state:${userId}`, JSON.stringify({ step: "registered" }));
-        await env.Teligy3V.delete(`code:${userId}`);
-        await env.Teligy3V.delete(`joined_at:${userId}`);
+        await db.prepare("UPDATE users SET status = ? WHERE id = ?")
+          .bind("registered", userId)
+          .run();
+        await db.prepare("DELETE FROM confirmation_codes WHERE user_id = ?")
+          .bind(userId)
+          .run();
 
         return new Response("OK");
       }
@@ -202,48 +238,27 @@ export default {
       console.error("Error processing request:", error);
       return new Response("Internal Server Error", { status: 500 });
     }
-  },
-
-  async scheduled(event, env) {
-    await removeInactiveUsers(env);
-  },
+  }
 };
 
-// ✅ Авто-видалення неактивних
-async function removeInactiveUsers(env) {
-  const cutoff = Date.now() - 60 * 60 * 24 * 1000; // 24 години
+// Функція для видалення неактивних користувачів (наприклад, після 24 годин)
+async function removeInactiveUsers(db, env) {
+  const now = Date.now();
+  const timeout = 24 * 60 * 60 * 1000; // 24 години
 
-  const list = await env.Teligy3V.list({ prefix: "joined_at:" });
-  const aptList = await env.Teligy3V.list({ prefix: "apt:" });
+  const users = await db.prepare("SELECT * FROM users WHERE status = ?")
+    .bind("not_registered")
+    .all();
 
-  for (const key of list.keys) {
-    const userId = key.name.split(":")[1];
-    const joinedAtStr = await env.Teligy3V.get(`joined_at:${userId}`);
-    const stateRaw = await env.Teligy3V.get(`state:${userId}`);
-
-    if (!joinedAtStr || !stateRaw) continue;
-
-    const joinedAt = Number(joinedAtStr);
-    const state = JSON.parse(stateRaw);
-
-    if (
-      joinedAt < cutoff &&
-      !["awaiting_code", "registered"].includes(state.step)
-    ) {
-      await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/banChatMember`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: env.GROUP_CHAT_ID,
-          user_id: userId,
-        }),
-      });
-
-      await env.Teligy3V.delete(`joined_at:${userId}`);
-      await env.Teligy3V.delete(`state:${userId}`);
-      await env.Teligy3V.delete(`code:${userId}`);
-      await env.Teligy3V.delete(`last_active:${userId}`);
-      await env.Teligy3V.delete(`apt:*${userId}`);
+  for (const user of users) {
+    if (now - user.joined_at > timeout) {
+      await db.prepare("DELETE FROM users WHERE id = ?")
+        .bind(user.id)
+        .run();
+      await db.prepare("DELETE FROM confirmation_codes WHERE user_id = ?")
+        .bind(user.id)
+        .run();
+      await sendMessage(env.ADMIN_CHAT_ID, `Користувач ${user.id} не пройшов реєстрацію і був видалений.`);
     }
   }
 }
