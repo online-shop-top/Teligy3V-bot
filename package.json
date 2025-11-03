@@ -1,0 +1,16 @@
+{
+  "name": "teligy3v-bot",          // Назва вашого проєкту
+  "version": "1.0.0",              // Версія проєкту
+  "main": "src/index.js",          // Вказуємо головний файл
+  "scripts": {
+    "start": "wrangler dev",       // Команда для запуску в розробницькому режимі
+    "deploy": "wrangler publish"   // Команда для публікації на Cloudflare
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "wrangler": "^4.0.0"           // Додаємо wrangler як залежність для розробки
+  },
+  "engines": {
+    "node": "16.x"                 // Вказуємо версію Node.js (зазвичай 16.x для Workers)
+  }
+}
