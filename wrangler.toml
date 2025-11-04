@@ -12,9 +12,9 @@ GROUP_CHAT_ID = "${{ secrets.GROUP_CHAT_ID }}"
 binding = "Teligy3V"
 id = "be029e33b2b447e2befdf57751d20343"
 
-### ✅ D1 DATABASE
+### ✅ D1 база — додано
 [[d1_databases]]
-binding = "house_bot"
+binding = "DB"
 database_name = "house_bot"
 database_id = "b31d8de6-0f07-4c82-8956-060841d11c42"
 
