@@ -137,7 +137,7 @@ export default {
           let text = "👥 *Мешканці*\n\n";
           if (!res.results.length) text += "_Немає зареєстрованих_";
           else res.results.forEach(u => {
-            text += `🏠 Кв. ${u.apartment} — ${u.full_name} 📞 ${u.phone}\n`;
+            text += `🏠 Кв. ${u.apartment} 👤 ${u.full_name} 📞 ${u.phone}\n`;
           });
 
           await sendMessage(userId, text);
