@@ -14,9 +14,7 @@ export default {
         return new Response("Cron job completed");
       }
 
-      if (request.method !== "POST") {
-        return new Response("Only POST method is allowed for this endpoint.", { status: 405 });
-      }
+      
 
       // 📌 Admin endpoint to view all users
       const url = new URL(request.url);
@@ -31,6 +29,10 @@ export default {
         return new Response(JSON.stringify(res.results || []), {
           headers: { "Content-Type": "application/json" }
         });
+      }
+
+      if (request.method !== "POST") {
+        return new Response("Only POST method is allowed for this endpoint.", { status: 405 });
       }
 
       const update = await request.json();
