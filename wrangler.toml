@@ -1,15 +1,31 @@
 name = "teligy3v-bot"
 main = "src/index.js"
+compatibility_date = "2025-10-16"
+account_id = "86e97485017fdd3df450c1d758ce1b36"
 
-# Вказуємо, що використовуємо ES модулі
-type = "module"
-
-[[d1_databases]]
-binding = "my_database"
-database_id = "7598b981-00a8-405b-b4d8-91aff9b877b2"
-
-# Ваші змінні оточення
 [vars]
 TG_BOT_TOKEN = "${{ secrets.TG_BOT_TOKEN }}"
 ADMIN_CHAT_ID = "${{ secrets.ADMIN_CHAT_ID }}"
 GROUP_CHAT_ID = "${{ secrets.GROUP_CHAT_ID }}"
+
+[[kv_namespaces]]
+binding = "Teligy3V"
+id = "be029e33b2b447e2befdf57751d20343"
+
+### ✅ D1 база — додано
+[[d1_databases]]
+binding = "DB"
+database_name = "house_bot"
+database_id = "b31d8de6-0f07-4c82-8956-060841d11c42"
+
+[triggers]
+crons = ["0 0 * * *"]
+
+[observability]
+enabled = false
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
