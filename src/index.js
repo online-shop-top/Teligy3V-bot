@@ -1,5 +1,37 @@
 import { getUser, saveState, registerUser } from "./db.js";
 
+// ---------------------- ADMIN PANEL ------------------------
+
+async function sendAdminMenu(env, chatId) {
+  const keyboard = {
+    inline_keyboard: [
+      [
+        { text: "👥 Мешканці", callback_data: "admin_users" },
+        { text: "🏢 Квартири", callback_data: "admin_apartments" }
+      ],
+      [
+        { text: "🆕 Заявки", callback_data: "admin_pending" },
+        { text: "📊 Статистика", callback_data: "admin_stats" }
+      ],
+      [
+        { text: "🔄 Перевірити БД", callback_data: "admin_check_db" }
+      ]
+    ]
+  };
+
+  await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: "🛠 Адмін-панель",
+      reply_markup: keyboard
+    })
+  });
+}
+
+// ---------------------- MAIN BOT LOGIC ------------------------
+
 export default {
   async fetch(request, env) {
     try {
@@ -9,36 +41,41 @@ export default {
         });
       }
 
+      // Cron handler
       if (request.headers.get("CF-Worker-Cron") === "true") {
         await removeInactiveUsers(env);
         return new Response("Cron job completed");
       }
 
-      
+      // ----------------- ADMIN HTTP API -----------------
 
-      // 📌 Admin endpoint to view all users
       const url = new URL(request.url);
       if (request.method === "GET" && url.pathname === "/admin/users") {
         if (url.searchParams.get("secret") !== env.ADMIN_CHAT_ID) {
           return new Response("Forbidden", { status: 403 });
         }
-        const res = await env.DB.prepare(
-          "SELECT tg_id, full_name, apartment, phone, state, created_at FROM users"
-        ).all();
+
+        const res = await env.DB
+          .prepare("SELECT tg_id, full_name, apartment, phone, state, created_at FROM users")
+          .all();
 
         return new Response(JSON.stringify(res.results || []), {
           headers: { "Content-Type": "application/json" }
         });
       }
 
+      // ----------------- IF NOT POST → STOP ------------------
+
       if (request.method !== "POST") {
         return new Response("Only POST method is allowed for this endpoint.", { status: 405 });
       }
 
+      // -------------- TELEGRAM UPDATE HANDLER ---------------
+
       const update = await request.json();
 
       async function sendMessage(chatId, text, reply_markup = null) {
-        const body = { chat_id: chatId, text };
+        const body = { chat_id: chatId, text, parse_mode: "Markdown" };
         if (reply_markup) body.reply_markup = reply_markup;
 
         await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/sendMessage`, {
@@ -63,27 +100,100 @@ export default {
 
       if (!userId) return new Response("Invalid user data", { status: 400 });
 
-      // 🆕 Отримуємо стан із SQL
-      const userRecord = await getUser(env, userId);
-      const userState = userRecord?.state || null;
+      // ----------------- SQL LOAD USER -----------------
 
-      // ✅ Новий учасник групи
+      const record = await getUser(env, userId);
+      const userState = record?.state || null;
+
+      // ----------------- ADMIN COMMANDS -----------------
+
+      if (update.message?.text === "/admin") {
+        if (userId.toString() !== env.ADMIN_CHAT_ID.toString()) {
+          await sendMessage(userId, "⛔ Доступ заборонено");
+          return new Response("OK");
+        }
+
+        await sendAdminMenu(env, userId);
+        return new Response("OK");
+      }
+
+      // ----------------- ADMIN CALLBACKS -----------------
+
+      if (update.callback_query?.data?.startsWith("admin_")) {
+        const action = update.callback_query.data.split("_")[1];
+        await answerCallback(update.callback_query.id);
+
+        if (userId.toString() !== env.ADMIN_CHAT_ID.toString()) {
+          await sendMessage(userId, "⛔ Доступ заборонено");
+          return new Response("OK");
+        }
+
+        // USERS LIST
+        if (action === "users") {
+          const res = await env.DB.prepare(
+            "SELECT full_name, apartment, phone FROM users ORDER BY apartment ASC"
+          ).all();
+
+          let text = "👥 *Мешканці*\n\n";
+          if (!res.results.length) text += "_Немає зареєстрованих_";
+          else res.results.forEach(u => {
+            text += `🏠 Кв. ${u.apartment} — ${u.full_name} 📞 ${u.phone}\n`;
+          });
+
+          await sendMessage(userId, text);
+        }
+
+        // APARTMENTS
+        if (action === "apartments") {
+          const res = await env.DB.prepare(
+            "SELECT apartment, COUNT(*) as c FROM users GROUP BY apartment ORDER BY apartment"
+          ).all();
+
+          let text = "🏢 *Квартири*\n\n";
+          if (!res.results.length) text += "_Немає даних_";
+          else res.results.forEach(u => {
+            text += `Кв. ${u.apartment}: ${u.c} мешканців\n`;
+          });
+
+          await sendMessage(userId, text);
+        }
+
+        // STATS
+        if (action === "stats") {
+          const total = await env.DB.prepare("SELECT COUNT(*) AS c FROM users").first();
+          await sendMessage(userId, `📊 *Статистика*\n👥 Мешканців: ${total.c}`);
+        }
+
+        if (action === "pending") {
+          await sendMessage(userId, "🆕 Модуль заявок скоро 🛠");
+        }
+
+        if (action === "check_db") {
+          const total = await env.DB.prepare("SELECT COUNT(*) AS c FROM users").first();
+          await sendMessage(userId, `✅ БД працює\n👥 Користувачів: ${total.c}`);
+        }
+
+        return new Response("OK");
+      }
+
+      // ----------------- JOIN FLOW -----------------
+
+      // New chat member auto-track
       if (update.chat_member?.new_chat_member?.status === "member") {
         await env.Teligy3V.put(`joined_at:${userId}`, Date.now().toString());
         await saveState(env, userId, { step: "not_registered" });
         return new Response("OK");
       }
 
-      // ✅ activity update
       await env.Teligy3V.put(`last_active:${userId}`, Date.now().toString());
 
-      // ✅ /start
+      // START
       if (update.message?.text === "/start") {
-        const firstName = update.message.from.first_name || "користувач";
+        const fn = update.message.from.first_name || "друже";
 
         await sendMessage(
           userId,
-          `👋 Привіт, ${firstName}!\nНатисни кнопку нижче, щоб подати заявку на приєднання до групи.`,
+          `👋 Привіт, ${fn}! Натисни кнопку нижче, щоб подати заявку`,
           { inline_keyboard: [[{ text: "ПРИЄДНАТИСЬ ✅", callback_data: "join_request" }]] }
         );
 
@@ -91,13 +201,18 @@ export default {
         return new Response("OK");
       }
 
-      // ✅ join button
+      // JOIN BUTTON
       if (update.callback_query?.data === "join_request") {
         await answerCallback(update.callback_query.id);
 
         await sendMessage(
           userId,
-          `👥 Мета чату:\n... (тут правила залишаються як у тебе) ...`,
+`👥 Правила чату:
+– Ввічливість
+– Без політики, війни, реклами
+– Тільки важливі повідомлення після 22:00
+
+✅ Погоджуюсь`,
           { inline_keyboard: [[{ text: "ПОГОДЖУЮСЬ ✅", callback_data: "rules_accept" }]] }
         );
 
@@ -105,7 +220,7 @@ export default {
         return new Response("OK");
       }
 
-      // ✅ rules accepted
+      // ACCEPT RULES
       if (update.callback_query?.data === "rules_accept") {
         await answerCallback(update.callback_query.id);
         await sendMessage(userId, "Введіть номер квартири:");
@@ -113,66 +228,62 @@ export default {
         return new Response("OK");
       }
 
-      // ✅ apartment input
+      // APARTMENT
       if (userState?.step === "awaiting_apartment" && update.message?.text) {
-        const aptNum = parseInt(update.message.text.trim(), 10);
+        const apt = parseInt(update.message.text.trim(), 10);
 
-        if (isNaN(aptNum) || aptNum < 1 || aptNum > 120) {
-          await sendMessage(userId, "❌ Такої квартири не існує. Спробуйте ще раз.");
+        if (isNaN(apt) || apt < 1 || apt > 120) {
+          await sendMessage(userId, "❌ Невірний номер. Спробуйте ще раз.");
           return new Response("OK");
         }
 
-        // 🆕 SQL: count users in apartment
         const current = await env.DB.prepare(
           "SELECT COUNT(*) as c FROM users WHERE apartment = ?"
-        ).bind(aptNum).first();
+        ).bind(apt).first();
 
         if (current.c >= 2) {
-          await sendMessage(userId, "❌ На цю квартиру вже зареєстровано 2 мешканці.");
+          await sendMessage(userId, "❌ 2 мешканці вже зареєстровані.");
           return new Response("OK");
         }
 
-        await saveState(env, userId, { step: "awaiting_details", apartment: aptNum });
-        await sendMessage(userId, "Введіть ім'я та телефон через кому. Наприклад: Іван, 0681234567");
+        await saveState(env, userId, { step: "awaiting_details", apartment: apt });
+        await sendMessage(userId, "Введіть: Ім'я, телефон\nНаприклад: Іван, 0681234567");
         return new Response("OK");
       }
 
-      // ✅ name & phone
+      // USER DETAILS
       if (userState?.step === "awaiting_details" && update.message?.text) {
         const [name, phone] = update.message.text.trim().split(",").map(s => s.trim());
+        const apt = userState.apartment;
 
         if (!name || !phone) {
-          await sendMessage(userId, "Будь ласка, введіть ім'я і телефон через кому.");
+          await sendMessage(userId, "Введіть: Ім'я, телефон");
           return new Response("OK");
         }
 
-        const aptNum = userState.apartment;
-
-        // 🆕 SQL insert
-        await registerUser(env, userId, name, phone, aptNum);
+        await registerUser(env, userId, name, phone, apt);
 
         const code = Math.floor(1000 + Math.random() * 9000).toString();
         await env.Teligy3V.put(`code:${userId}`, code);
 
-        await saveState(env, userId, { step: "awaiting_code", apartment: aptNum });
+        await saveState(env, userId, { step: "awaiting_code", apartment: apt });
 
-        await sendMessage(env.ADMIN_CHAT_ID, `Новий учасник:
-Квартира: ${aptNum}
-Ім’я: ${name}
-Телефон: ${phone}
-Код підтвердження: ${code}`);
+        await sendMessage(env.ADMIN_CHAT_ID,
+`Нова заявка:
+🏠 Кв. ${apt}
+👤 ${name}
+📞 ${phone}
+🔐 Код: ${code}`);
 
-        await sendMessage(userId, "✅ Код відправлено адміну. Введіть його:");
+        await sendMessage(userId, "✅ Код відправлено адміну. Введи його:");
         return new Response("OK");
       }
 
-      // ✅ code check
+      // CODE CHECK
       if (userState?.step === "awaiting_code" && update.message?.text) {
-        const savedCode = await env.Teligy3V.get(`code:${userId}`);
-        const aptNum = userState.apartment;
-
-        if (update.message.text.trim() !== savedCode) {
-          await sendMessage(userId, "❌ Невірний код. Спробуйте ще раз.");
+        const saved = await env.Teligy3V.get(`code:${userId}`);
+        if (update.message.text.trim() !== saved) {
+          await sendMessage(userId, "❌ Невірно. Спробуйте ще.");
           return new Response("OK");
         }
 
@@ -181,11 +292,10 @@ export default {
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({ chat_id: env.GROUP_CHAT_ID, member_limit: 1 })
         });
-
         const invite = await resp.json();
         const link = invite.result.invite_link;
 
-        await sendMessage(userId, `✅ Код вірний! Ось посилання:\n${link}`);
+        await sendMessage(userId, `✅ Вітаємо! Приєднуйтесь:\n${link}`);
 
         await saveState(env, userId, { step: "registered" });
 
@@ -196,34 +306,33 @@ export default {
       }
 
       return new Response("OK");
+
     } catch (e) {
-      console.error("Error:", e);
-      return new Response("Internal Server Error", { status: 500 });
+      console.error("Error", e);
+      return new Response("Internal Error", { status: 500 });
     }
   },
 
   async scheduled(event, env) {
     await removeInactiveUsers(env);
-  },
+  }
 };
 
-// ✅ auto purge
+// ------------------- CLEANUP ---------------------
+
 async function removeInactiveUsers(env) {
-  const cutoff = Date.now() - 60 * 60 * 24 * 1000; // 24h
+  const cutoff = Date.now() - 24 * 3600 * 1000;
 
   const list = await env.Teligy3V.list({ prefix: "joined_at:" });
-
   for (const key of list.keys) {
     const userId = key.name.split(":")[1];
-    const joinedAtStr = await env.Teligy3V.get(`joined_at:${userId}`);
-    const stateRaw = await env.Teligy3V.get(`state:${userId}`);
+    const ts = Number(await env.Teligy3V.get(`joined_at:${userId}`));
+    const raw = await env.Teligy3V.get(`state:${userId}`);
 
-    if (!joinedAtStr || !stateRaw) continue;
+    if (!ts || !raw) continue;
 
-    const joinedAt = Number(joinedAtStr);
-    const state = JSON.parse(stateRaw);
-
-    if (joinedAt < cutoff && !["awaiting_code", "registered"].includes(state.step)) {
+    const st = JSON.parse(raw);
+    if (ts < cutoff && !["awaiting_code","registered"].includes(st.step)) {
       await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/banChatMember`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
