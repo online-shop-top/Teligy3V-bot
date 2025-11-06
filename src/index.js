@@ -186,6 +186,23 @@ export default {
         return new Response("OK");
       }
 
+      if (
+        update.chat_member?.new_chat_member?.status === "kicked" ||
+        update.chat_member?.new_chat_member?.status === "left"
+      ) {
+        const userId = update.chat_member.new_chat_member.user.id;
+
+        // Очистити всі дані користувача
+        await env.Teligy3V.delete(`joined_at:${userId}`);
+        await env.Teligy3V.delete(`state:${userId}`);
+        await env.Teligy3V.delete(`code:${userId}`);
+        await env.Teligy3V.delete(`last_active:${userId}`);
+
+        // Якщо він був у БД — видаляємо запис
+        await env.DB.prepare("DELETE FROM users WHERE tg_id = ?").bind(userId).run();
+
+        return new Response("OK");
+      }
       await env.Teligy3V.put(`last_active:${userId}`, Date.now().toString());
 
       // START
