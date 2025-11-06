@@ -180,8 +180,9 @@ export default {
 
       // New chat member auto-track
       if (update.chat_member?.new_chat_member?.status === "member") {
-        await env.Teligy3V.put(`joined_at:${userId}`, Date.now().toString());
-        await saveState(env, userId, { step: "not_registered" });
+        // Позначаємо користувача як приєднаного (тобто завершена реєстрація)
+        await saveState(env, userId, { step: "registered" });
+        await env.Teligy3V.delete(`joined_at:${userId}`); // очищаємо тимчасову мітку
         return new Response("OK");
       }
 
@@ -348,7 +349,7 @@ async function removeInactiveUsers(env) {
     if (!ts || !raw) continue;
 
     const st = JSON.parse(raw);
-    if (ts < cutoff && !["awaiting_code","registered"].includes(st.step)) {
+    if (ts < cutoff && st.step !== "registered") {
       await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/banChatMember`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
