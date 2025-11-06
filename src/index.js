@@ -194,7 +194,7 @@ export default {
 
         await sendMessage(
           userId,
-          `👋 Привіт, ${fn}! Натисни кнопку нижче, щоб подати заявку`,
+          `👋 Привіт, ${fn}! Натисніть кнопку нижче, щоб подати заявку`,
           { inline_keyboard: [[{ text: "ПРИЄДНАТИСЬ ✅", callback_data: "join_request" }]] }
         );
 
@@ -292,7 +292,7 @@ export default {
 📞 ${phone}
 🔐 Код: ${code}`);
 
-        await sendMessage(userId, "✅ Очікуй код від адміністратора. Потім введи його:");
+        await sendMessage(userId, "✅ Очікуйте код від адміністратора. Потім введіть його:");
         return new Response("OK");
       }
 
@@ -312,7 +312,7 @@ export default {
         const invite = await resp.json();
         const link = invite.result.invite_link;
 
-        await sendMessage(userId, `✅ Вітаємо! Приєднуйтесь:\n${link}`);
+        await sendMessage(userId, `✅ Вітаємо! Ось посилання на чат групи:\n${link}`);
 
         await saveState(env, userId, { step: "registered" });
 
