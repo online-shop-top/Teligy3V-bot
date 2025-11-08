@@ -51,7 +51,7 @@ export default {
 
       const url = new URL(request.url);
       if (request.method === "GET" && url.pathname === "/admin/users") {
-        if (url.searchParams.get("secret") !== env.ADMIN_CHAT_ID) {
+        if (url.searchParams.get("secret") !== env.TG_SECRET_TOKEN) {
           return new Response("Forbidden", { status: 403 });
         }
 
