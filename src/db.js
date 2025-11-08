@@ -1,72 +1,49 @@
-// src/db.js
-export async function getUser(env, userId) {
-  // 1) Пробуємо отримати з D1
-  const row = await env.DB.prepare(
-    "SELECT tg_id, full_name, apartment, phone, is_admin, state FROM users WHERE tg_id = ?"
-  ).bind(userId.toString()).first();
+// db.js
+export async function saveState(env, tg_id, stateObj) {
+  const key = `state:${tg_id}`;
+  await env.Teligy3V.put(key, JSON.stringify(stateObj));
+}
 
-  if (row) {
-    return {
-      userId: row.tg_id,
-      name: row.full_name,
-      apartment: row.apartment,
-      phone: row.phone,
-      isAdmin: row.is_admin === 1,
-      state: row.state ? JSON.parse(row.state) : null
-    };
+export async function getUser(env, tg_id) {
+  // Повертає об’єкт стану або null, якщо немає
+  const raw = await env.Teligy3V.get(`state:${tg_id}`);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
   }
-
-  // 2) Якщо в D1 немає — шукаємо в KV
-  const kvState = await env.Teligy3V.get(`state:${userId}`);
-  if (!kvState) return null;
-
-  // 3) Lazy-migration: переносимо у D1
-  const state = JSON.parse(kvState);
-  const apartment = state.apartment || null;
-  const name = state.name || null;
-  const phone = state.phone || null;
-
-  await env.DB.prepare(
-    "INSERT OR IGNORE INTO users (tg_id, full_name, apartment, phone, state) VALUES (?, ?, ?, ?, ?)"
-  ).bind(
-    userId.toString(),
-    name,
-    apartment,
-    phone,
-    JSON.stringify(state)
-  ).run();
-
-  return { userId, name, apartment, phone, state };
 }
 
-export async function saveState(env, userId, state) {
-  await env.DB.prepare(
-    "UPDATE users SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE tg_id = ?"
-  ).bind(JSON.stringify(state), userId.toString()).run();
+// ---------------------- REGISTER USER ------------------------
 
-  // fallback для старих користувачів (на перехідний період)
-  await env.Teligy3V.put(`state:${userId}`, JSON.stringify(state));
-}
+export async function registerUser(env, tg_id, full_name, phone, apartment) {
+  try {
+    // 1️⃣ Перевіряємо, чи такий користувач вже є
+    const existing = await env.DB
+      .prepare("SELECT id FROM users WHERE tg_id = ?")
+      .bind(tg_id)
+      .first();
 
-export async function registerUser(env, userId, name, phone, apartment) {
-  await env.DB.prepare(
-    `INSERT INTO users (tg_id, full_name, apartment, phone, state) 
-     VALUES (?, ?, ?, ?, ?) 
-     ON CONFLICT(tg_id) DO UPDATE SET 
-       full_name = excluded.full_name,
-       apartment = excluded.apartment,
-       phone = excluded.phone,
-       state = excluded.state,
-       updated_at = CURRENT_TIMESTAMP`
-  ).bind(
-    userId.toString(),
-    name,
-    apartment,
-    phone,
-    JSON.stringify({ step: "registered" })
-  ).run();
+    if (existing) {
+      console.log(`ℹ️ Користувач ${tg_id} вже існує, пропускаємо.`);
+      return existing.id;
+    }
 
-  await env.Teligy3V.delete(`state:${userId}`);
-  await env.Teligy3V.delete(`code:${userId}`);
-  await env.Teligy3V.delete(`joined_at:${userId}`);
+    // 2️⃣ Створюємо запис
+    const created_at = new Date().toISOString();
+    await env.DB.prepare(`
+      INSERT INTO users (tg_id, full_name, phone, apartment, state, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `)
+      .bind(tg_id, full_name, phone, apartment, "registered", created_at)
+      .run();
+
+    console.log(`✅ Новий користувач ${full_name} (кв. ${apartment}) доданий.`);
+    return true;
+
+  } catch (e) {
+    console.error("❌ Помилка при реєстрації користувача:", e);
+    return false;
+  }
 }
