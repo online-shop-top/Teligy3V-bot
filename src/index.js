@@ -167,7 +167,7 @@ export default {
         const apt = userState.apartment;
 
         if (!name || !phone) {
-          await sendMessage(userId, "⚠️ Введіть у форматі: Ім’я, телефон", {
+          await sendMessage(userId, "⚠️ Введіть ім'я та телефон через кому. Наприклад: Іван, 0681234567", {
             inline_keyboard: [[{ text: "🔁 Почати спочатку", callback_data: "restart" }]]
           });
           return new Response("OK");
