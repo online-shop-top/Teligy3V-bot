@@ -3,15 +3,39 @@ import { getUser, saveState, registerUser, clearState } from "./db.js";
 export default {
   async fetch(request, env) {
     try {
-      // ...інші частини без змін...
+      if (request.method !== "POST") {
+        return new Response("Only POST requests are supported", { status: 405 });
+      }
 
       const update = await request.json();
+
+      // ---------- Службові функції ----------
+      async function sendMessage(chatId, text, reply_markup = null) {
+        const body = { chat_id: chatId, text, parse_mode: "Markdown" };
+        if (reply_markup) body.reply_markup = reply_markup;
+
+        await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      }
+
+      async function answerCallback(id, text = null) {
+        await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/answerCallbackQuery`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ callback_query_id: id, text }),
+        });
+      }
+
       const userId =
         update.message?.from?.id ||
         update.callback_query?.from?.id ||
         update.chat_member?.new_chat_member?.user?.id;
 
       if (!userId) return new Response("Invalid user data", { status: 400 });
+
       const record = await getUser(env, userId);
       const userState = record?.state || null;
 
@@ -41,11 +65,7 @@ export default {
       if (update.callback_query?.data === "restart") {
         await answerCallback(update.callback_query.id);
         await clearState(env, userId);
-        await sendMessage(
-          userId,
-          "🔁 Почнемо спочатку!",
-        );
-        // Повертаємо до /start
+        await sendMessage(userId, "🔁 Почнемо спочатку!");
         await sendMessage(
           userId,
           "👋 Натисніть кнопку нижче, щоб подати заявку",
@@ -69,7 +89,7 @@ export default {
 
         await sendMessage(
           userId,
-          "👥 Мета чату:
+          `👥 Мета чату:
 Комунікація, опитування, прийняття рішень, оперативне інформування про важливі події, аварії тощо.
 
 🤝 Поважай інших учасників чату:
@@ -90,7 +110,7 @@ export default {
 
 ✅ Вступ до чату = згода з правилами.
 
-❤️ Будьмо ввічливими, активними та відповідальними — разом зробимо наш будинок комфортним!",
+❤️ Будьмо ввічливими, активними та відповідальними — разом зробимо наш будинок комфортним!`,
           { inline_keyboard: [[{ text: "ПОГОДЖУЮСЬ ✅", callback_data: "rules_accept" }]] }
         );
 
@@ -153,7 +173,7 @@ export default {
           return new Response("OK");
         }
 
-        // Тепер не додаємо в БД, лише зберігаємо в state
+        // Зберігаємо у state, але ще не в БД
         await saveState(env, userId, { step: "awaiting_code", apartment: apt, name, phone });
 
         const code = Math.floor(1000 + Math.random() * 9000).toString();
@@ -186,7 +206,7 @@ export default {
 
         const { name, phone, apartment } = userState;
 
-        // ✅ Реєстрація тепер лише тут
+        // ✅ Реєстрація лише після підтвердження коду
         await registerUser(env, userId, name, phone, apartment);
 
         const resp = await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/createChatInviteLink`, {
