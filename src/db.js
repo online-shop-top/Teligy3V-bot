@@ -1,5 +1,6 @@
 // src/db.js
 export async function getUser(env, userId) {
+  // 1) Пробуємо отримати з D1
   const row = await env.DB.prepare(
     "SELECT tg_id, full_name, apartment, phone, is_admin, state FROM users WHERE tg_id = ?"
   ).bind(userId.toString()).first();
@@ -15,9 +16,11 @@ export async function getUser(env, userId) {
     };
   }
 
+  // 2) Якщо в D1 немає — шукаємо в KV
   const kvState = await env.Teligy3V.get(`state:${userId}`);
   if (!kvState) return null;
 
+  // 3) Lazy-migration: переносимо у D1
   const state = JSON.parse(kvState);
   const apartment = state.apartment || null;
   const name = state.name || null;
@@ -25,20 +28,24 @@ export async function getUser(env, userId) {
 
   await env.DB.prepare(
     "INSERT OR IGNORE INTO users (tg_id, full_name, apartment, phone, state) VALUES (?, ?, ?, ?, ?)"
-  ).bind(userId.toString(), name, apartment, phone, JSON.stringify(state)).run();
+  ).bind(
+    userId.toString(),
+    name,
+    apartment,
+    phone,
+    JSON.stringify(state)
+  ).run();
 
   return { userId, name, apartment, phone, state };
 }
 
 export async function saveState(env, userId, state) {
-  await env.Teligy3V.put(`state:${userId}`, JSON.stringify(state));
-}
+  await env.DB.prepare(
+    "UPDATE users SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE tg_id = ?"
+  ).bind(JSON.stringify(state), userId.toString()).run();
 
-export async function clearState(env, userId) {
-  await env.Teligy3V.delete(`state:${userId}`);
-  await env.Teligy3V.delete(`code:${userId}`);
-  await env.Teligy3V.delete(`joined_at:${userId}`);
-  await env.Teligy3V.delete(`last_active:${userId}`);
+  // fallback для старих користувачів (на перехідний період)
+  await env.Teligy3V.put(`state:${userId}`, JSON.stringify(state));
 }
 
 export async function registerUser(env, userId, name, phone, apartment) {
@@ -59,5 +66,7 @@ export async function registerUser(env, userId, name, phone, apartment) {
     JSON.stringify({ step: "registered" })
   ).run();
 
-  await clearState(env, userId);
+  await env.Teligy3V.delete(`state:${userId}`);
+  await env.Teligy3V.delete(`code:${userId}`);
+  await env.Teligy3V.delete(`joined_at:${userId}`);
 }
