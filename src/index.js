@@ -198,18 +198,18 @@ export default {
           await sendMessage(userId, "❌ Невірний номер. Спробуйте ще раз.");
           return new Response("OK");
         }
-
+        
         const res = await env.DB.prepare(
           "SELECT COUNT(*) as c FROM users WHERE apartment = ?"
         ).bind(apt).all();
-
+        
         const current = res.results?.[0]?.c || 0;
-
+        
         if (current >= 2) {
           await sendMessage(userId, "❌ 2 мешканці вже зареєстровані.");
           return new Response("OK");
         }
-
+        
         await saveState(env, userId, { step: "awaiting_details", apartment: apt });
         await sendMessage(userId, "Введіть ім'я та телефон через кому. Наприклад: Іван, 0681234567", { 
           inline_keyboard: [[{ text: "🔁 Почати спочатку", callback_data: "restart" }]] 
