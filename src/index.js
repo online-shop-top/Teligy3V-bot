@@ -199,11 +199,13 @@ export default {
           return new Response("OK");
         }
 
-        const current = await env.DB.prepare(
+        const res = await env.DB.prepare(
           "SELECT COUNT(*) as c FROM users WHERE apartment = ?"
-        ).bind(apt).first();
+        ).bind(apt).all();
 
-        if (current.c >= 2) {
+        const current = res.results?.[0]?.c || 0;
+
+        if (current >= 2) {
           await sendMessage(userId, "❌ 2 мешканці вже зареєстровані.");
           return new Response("OK");
         }
