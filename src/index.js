@@ -1,5 +1,39 @@
 import { getUser, saveState, registerUser } from "./db.js";
 
+// ------------------- CLEANUP OLD INVITES ---------------------
+
+async function cleanupOldInvites(env) {
+  const oneDayAgo = Math.floor(Date.now() / 1000) - 24 * 3600;
+
+  const res = await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/getChatInviteLinks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: env.GROUP_CHAT_ID,
+      limit: 100
+    })
+  });
+
+  const data = await res.json();
+  if (!data.ok || !data.result) return;
+
+  for (const link of data.result) {
+    const created = link.create_date;
+    const used = link.pending_join_request_count === 0 && link.member_limit === 1;
+
+    if (created < oneDayAgo || used) {
+      await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/revokeChatInviteLink`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: env.GROUP_CHAT_ID,
+          invite_link: link.invite_link
+        })
+      });
+    }
+  }
+}
+
 // ---------------------- ADMIN PANEL ------------------------
 
 async function sendAdminMenu(env, chatId) {
@@ -178,11 +212,9 @@ export default {
 
       // ----------------- JOIN FLOW -----------------
 
-      // New chat member auto-track
       if (update.chat_member?.new_chat_member?.status === "member") {
-        // Позначаємо користувача як приєднаного (тобто завершена реєстрація)
         await saveState(env, userId, { step: "registered" });
-        await env.Teligy3V.delete(`joined_at:${userId}`); // очищаємо тимчасову мітку
+        await env.Teligy3V.delete(`joined_at:${userId}`);
         return new Response("OK");
       }
 
@@ -192,17 +224,16 @@ export default {
       ) {
         const userId = update.chat_member.new_chat_member.user.id;
 
-        // Очистити всі дані користувача
         await env.Teligy3V.delete(`joined_at:${userId}`);
         await env.Teligy3V.delete(`state:${userId}`);
         await env.Teligy3V.delete(`code:${userId}`);
         await env.Teligy3V.delete(`last_active:${userId}`);
 
-        // Якщо він був у БД — видаляємо запис
         await env.DB.prepare("DELETE FROM users WHERE tg_id = ?").bind(userId).run();
 
         return new Response("OK");
       }
+
       await env.Teligy3V.put(`last_active:${userId}`, Date.now().toString());
 
       // START
@@ -225,7 +256,7 @@ export default {
 
         await sendMessage(
           userId,
-`👥 Мета чату:
+          `👥 Мета чату:
 Комунікація, опитування, прийняття рішень, оперативне інформування про важливі події, аварії тощо.
 
 🤝 Поважай інших учасників чату:
@@ -321,11 +352,15 @@ export default {
           return new Response("OK");
         }
 
+        // 🧹 Очищаємо старі інвайти перед створенням нового
+        await cleanupOldInvites(env);
+
         const resp = await fetch(`https://api.telegram.org/bot${env.TG_BOT_TOKEN}/createChatInviteLink`, {
           method: "POST",
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({ chat_id: env.GROUP_CHAT_ID, member_limit: 1 })
         });
+
         const invite = await resp.json();
         const link = invite.result.invite_link;
 
